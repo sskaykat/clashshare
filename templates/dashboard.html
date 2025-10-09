@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>管理面板 - Clash 订阅管理系统</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="dashboard">
+        <!-- 侧边栏 -->
+        <aside class="sidebar">
+            <div class="sidebar-header">
+                <h2>🚀 Clash 管理</h2>
+                <p class="admin-name">👤 {{ session.username }}</p>
+            </div>
+            
+            <nav class="sidebar-nav">
+                <a href="#overview" class="nav-item active" data-tab="overview">
+                    <span class="icon">📊</span>
+                    <span>概览</span>
+                </a>
+                <a href="#nodes" class="nav-item" data-tab="nodes">
+                    <span class="icon">🌐</span>
+                    <span>节点管理</span>
+                </a>
+                <a href="#subscriptions" class="nav-item" data-tab="subscriptions">
+                    <span class="icon">📡</span>
+                    <span>订阅管理</span>
+                </a>
+                <a href="#users" class="nav-item" data-tab="users">
+                    <span class="icon">👥</span>
+                    <span>用户管理</span>
+                </a>
+                <a href="#templates" class="nav-item" data-tab="templates">
+                    <span class="icon">📝</span>
+                    <span>模板管理</span>
+                </a>
+                <a href="#relay" class="nav-item" data-tab="relay">
+                    <span class="icon">🔗</span>
+                    <span>生成链式</span>
+                </a>
+                <a href="#settings" class="nav-item" data-tab="settings">
+                    <span class="icon">⚙️</span>
+                    <span>系统设置</span>
+                </a>
+            </nav>
+            
+            <div class="sidebar-footer">
+                <a href="/logout" class="btn btn-secondary btn-block">退出登录</a>
+            </div>
+        </aside>
+        
+        <!-- 主内容区 -->
+        <main class="main-content">
+            <!-- 概览 -->
+            <div id="overview-tab" class="tab-content active">
+                <h1>📊 数据概览</h1>
+                
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon">📡</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-subscriptions">0</div>
+                            <div class="stat-label">订阅链接</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">🌐</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-nodes">0</div>
+                            <div class="stat-label">代理节点</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">👥</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-users">0</div>
+                            <div class="stat-label">用户数量</div>
+                        </div>
+                    </div>
+                    
+                    <div class="stat-card">
+                        <div class="stat-icon">📝</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stat-templates">0</div>
+                            <div class="stat-label">配置模板</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="info-box">
+                    <h3>💡 使用指南</h3>
+                    <ul>
+                        <li><strong>订阅管理</strong>: 添加和管理机场订阅链接，自动更新节点</li>
+                        <li><strong>节点管理</strong>: 查看所有节点，支持重命名和手动添加</li>
+                        <li><strong>用户管理</strong>: 创建用户，为每个用户分配专属节点</li>
+                        <li><strong>用户订阅</strong>: 每个用户有独立的订阅链接，可在 Clash 中使用</li>
+                    </ul>
+                </div>
+            </div>
+            
+            <!-- 订阅管理 -->
+            <div id="subscriptions-tab" class="tab-content">
+                <div class="tab-header">
+                    <h1>📡 订阅管理</h1>
+                    <button class="btn btn-primary" onclick="showAddSubscriptionModal()">➕ 创建分组</button>
+                </div>
+                
+                <div class="info-box" style="margin-bottom: 20px;">
+                    <p><strong>💡 说明：</strong>订阅管理用于创建节点分组。在节点管理中添加节点时，可以选择归属到某个分组。</p>
+                </div>
+                
+                <div class="table-container">
+                    <table id="subscriptions-table">
+                        <thead>
+                            <tr>
+                                <th>分组名称</th>
+                                <th>所属用户</th>
+                                <th>节点数</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 节点管理 -->
+            <div id="nodes-tab" class="tab-content">
+                <div class="tab-header">
+                    <h1>🌐 节点管理</h1>
+                    <div>
+                        <button class="btn btn-success" onclick="showBatchImportModal()">📥 批量导入</button>
+                        <button class="btn btn-info" onclick="showManualCreateNodeModal()">✏️ 手动创建</button>
+                        <button class="btn btn-primary" onclick="showAddNodeModal()">➕ 添加节点</button>
+                    </div>
+                </div>
+                
+                <div class="table-container">
+                    <table id="nodes-table">
+                        <thead>
+                            <tr>
+                                <th>节点名称</th>
+                                <th>协议</th>
+                                <th>所属订阅</th>
+                                <th>所属用户</th>
+                                <th>排序</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 用户管理 -->
+            <div id="users-tab" class="tab-content">
+                <div class="tab-header">
+                    <h1>👥 用户管理</h1>
+                    <button class="btn btn-primary" onclick="showAddUserModal()">➕ 添加用户</button>
+                </div>
+                
+                <div class="info-box" style="margin-bottom: 20px;">
+                    <p><strong>💡 说明：</strong>用户管理用于创建不同的分组，每个分组可以分配不同的订阅链接，所有订阅下的节点会聚合到用户的专属订阅链接中。</p>
+                </div>
+                
+                <div class="table-container">
+                    <table id="users-table">
+                        <thead>
+                            <tr>
+                                <th>名称</th>
+                                <th>备注</th>
+                                <th>配置模板</th>
+                                <th>订阅数</th>
+                                <th>节点数</th>
+                                <th>状态</th>
+                                <th>订阅链接</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 模板管理 -->
+            <div id="templates-tab" class="tab-content">
+                <div class="tab-header">
+                    <h1>📝 模板管理</h1>
+                    <div>
+                        <button class="btn btn-success" onclick="showImportTemplateModal()">📤 导入配置文件</button>
+                        <button class="btn btn-primary" onclick="showAddTemplateModal()">➕ 创建模板</button>
+                    </div>
+                </div>
+                
+                <div class="info-box" style="margin-bottom: 20px;">
+                    <p><strong>💡 说明：</strong>模板用于自定义Clash配置的proxy-groups和rules部分。在模板中使用 <code>PROXY_NODES</code> 占位符代表所有节点。</p>
+                </div>
+                
+                <div class="table-container">
+                    <table id="templates-table">
+                        <thead>
+                            <tr>
+                                <th>模板名称</th>
+                                <th>描述</th>
+                                <th>使用次数</th>
+                                <th>默认</th>
+                                <th>创建时间</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 生成链式 -->
+            <div id="relay-tab" class="tab-content">
+                <div class="tab-header">
+                    <h1>🔗 生成链式代理</h1>
+                    <button class="btn btn-primary" onclick="showCreateRelayModal()">➕ 创建链式节点</button>
+                </div>
+                
+                <div class="info-box" style="margin-bottom: 20px;">
+                    <h3>💡 什么是链式代理（Relay）？</h3>
+                    <p>链式代理允许数据依次通过多个代理节点，实现多级跳转。例如：<strong>你的设备 → 前置节点 → 后置节点 → 目标网站</strong></p>
+                    <p><strong>使用场景：</strong></p>
+                    <ul>
+                        <li>提高隐私保护：通过多层代理隐藏真实IP</li>
+                        <li>绕过地域限制：组合不同地区的节点访问特定内容</li>
+                        <li>优化路由：利用中转节点改善连接质量</li>
+                    </ul>
+                    <p><strong>⚠️ 注意：</strong>链式代理会增加延迟，建议选择低延迟节点。默认禁用UDP以保证稳定性。</p>
+                </div>
+                
+                <div class="table-container">
+                    <table id="relay-nodes-table">
+                        <thead>
+                            <tr>
+                                <th>链式节点名称</th>
+                                <th>代理链</th>
+                                <th>所属订阅</th>
+                                <th>所属用户</th>
+                                <th>操作</th>
+                            </tr>
+                        </thead>
+                        <tbody></tbody>
+                    </table>
+                </div>
+            </div>
+            
+            <!-- 系统设置 -->
+            <div id="settings-tab" class="tab-content">
+                <h1>⚙️ 系统设置</h1>
+                
+                <div class="settings-container">
+                    <!-- 账户信息 -->
+                    <div class="settings-section">
+                        <h2>👤 账户信息</h2>
+                        <div class="info-box">
+                            <div class="info-item">
+                                <span class="info-label">当前用户名：</span>
+                                <span class="info-value" id="current-username">{{ session.username }}</span>
+                            </div>
+                            <div class="info-item">
+                                <span class="info-label">账户创建时间：</span>
+                                <span class="info-value" id="account-created">加载中...</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 修改用户名 -->
+                    <div class="settings-section">
+                        <h2>✏️ 修改用户名</h2>
+                        <div class="settings-form">
+                            <div class="form-group">
+                                <label>新用户名</label>
+                                <input type="text" id="new-username" placeholder="至少3位字符">
+                            </div>
+                            <div class="form-group">
+                                <label>确认密码</label>
+                                <input type="password" id="username-password" placeholder="输入当前密码以确认">
+                            </div>
+                            <button class="btn btn-primary" onclick="changeUsername()">保存用户名</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 修改密码 -->
+                    <div class="settings-section">
+                        <h2>🔐 修改密码</h2>
+                        <div class="settings-form">
+                            <div class="form-group">
+                                <label>当前密码</label>
+                                <input type="password" id="current-password" placeholder="输入当前密码">
+                            </div>
+                            <div class="form-group">
+                                <label>新密码</label>
+                                <input type="password" id="new-password" placeholder="至少6位字符">
+                            </div>
+                            <div class="form-group">
+                                <label>确认新密码</label>
+                                <input type="password" id="confirm-password" placeholder="再次输入新密码">
+                            </div>
+                            <button class="btn btn-primary" onclick="changePassword()">修改密码</button>
+                        </div>
+                    </div>
+                    
+                    <!-- 安全提示 -->
+                    <div class="settings-section">
+                        <h2>⚠️ 安全提示</h2>
+                        <div class="info-box">
+                            <ul>
+                                <li>请定期更换密码以保证账户安全</li>
+                                <li>密码至少需要6位字符，建议包含字母、数字和特殊字符</li>
+                                <li>不要与他人分享管理员账号</li>
+                                <li>建议定期备份数据库文件 (clash_manager.db)</li>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- 添加订阅模态框 -->
+    <div id="addSubscriptionModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>创建订阅分组</h2>
+                <span class="close" onclick="closeModal('addSubscriptionModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 创建节点分组后，您可以在节点管理中添加节点到此分组，或者直接在此分组中管理节点。</p>
+                </div>
+                <div class="form-group">
+                    <label>分组名称</label>
+                    <input type="text" id="subName" placeholder="例如: 香港节点组">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addSubscriptionModal')">取消</button>
+                <button class="btn btn-primary" onclick="addSubscription()">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 添加节点模态框 -->
+    <div id="addNodeModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>添加节点</h2>
+                <span class="close" onclick="closeModal('addNodeModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>自定义名称（可选）</label>
+                    <input type="text" id="nodeName" placeholder="留空使用节点原始名称">
+                </div>
+                <div class="form-group">
+                    <label>节点链接</label>
+                    <textarea id="nodeUrl" rows="4" placeholder="ss://... 或 vmess://... 等"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>所属分组（可选）</label>
+                    <select id="nodeSubscription">
+                        <option value="">不归属任何分组</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addNodeModal')">取消</button>
+                <button class="btn btn-primary" onclick="addNode()">添加</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 批量导入节点模态框 -->
+    <div id="batchImportModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>批量导入节点</h2>
+                <span class="close" onclick="closeModal('batchImportModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 从机场订阅链接批量导入节点。可以选择将导入的节点归属到某个分组。</p>
+                </div>
+                <div class="form-group">
+                    <label>机场订阅链接</label>
+                    <input type="text" id="importUrl" placeholder="https://...">
+                </div>
+                <div class="form-group">
+                    <label>归属分组（可选）</label>
+                    <select id="importSubscription">
+                        <option value="">不归属任何分组</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('batchImportModal')">取消</button>
+                <button class="btn btn-success" onclick="batchImportNodes()">开始导入</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 添加用户模态框 -->
+    <div id="addUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>添加用户（分组）</h2>
+                <span class="close" onclick="closeModal('addUserModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>名称</label>
+                    <input type="text" id="userName" placeholder="例如: 家人、朋友、客户A 等">
+                </div>
+                <div class="form-group">
+                    <label>备注（可选）</label>
+                    <input type="text" id="userRemark" placeholder="添加备注说明">
+                </div>
+                <div class="info-box" style="margin-top: 15px;">
+                    <small>💡 创建后会自动生成订阅链接，可为该用户分配专属节点。</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addUserModal')">取消</button>
+                <button class="btn btn-primary" onclick="addUser()">添加</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑用户模态框 -->
+    <div id="editUserModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>编辑用户</h2>
+                <span class="close" onclick="closeModal('editUserModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>名称</label>
+                    <input type="text" id="editUserName" placeholder="用户名称">
+                </div>
+                <div class="form-group">
+                    <label>备注</label>
+                    <input type="text" id="editUserRemark" placeholder="备注说明">
+                </div>
+                <div class="form-group">
+                    <label>配置模板</label>
+                    <select id="editUserTemplate">
+                        <option value="">使用默认模板</option>
+                    </select>
+                    <small style="color: #666;">选择此用户使用的配置模板</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('editUserModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveUserEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 分配节点模态框 -->
+    <div id="assignSubscriptionsModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>管理订阅 - <span id="assignUserName"></span></h2>
+                <span class="close" onclick="closeModal('assignSubscriptionsModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 选择要分配给该用户的订阅链接，所有订阅下的节点都会包含在用户的专属订阅中。</p>
+                </div>
+                <div class="node-selection" id="subscriptionSelection"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('assignSubscriptionsModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveUserSubscriptions()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 管理订阅分组节点模态框 -->
+    <div id="manageSubscriptionNodesModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>管理节点 - <span id="manageSubscriptionName"></span></h2>
+                <span class="close" onclick="closeModal('manageSubscriptionNodesModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 选择要包含在此订阅分组中的节点。勾选后，节点会归属到此分组。</p>
+                </div>
+                <div class="node-selection" id="subscriptionNodeSelection"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('manageSubscriptionNodesModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveSubscriptionNodes()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 添加模板模态框 -->
+    <div id="addTemplateModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>创建配置模板</h2>
+                <span class="close" onclick="closeModal('addTemplateModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 在proxy-groups的proxies列表中使用 <code>PROXY_NODES</code> 作为占位符，系统会自动替换为实际节点。</p>
+                </div>
+                <div class="form-group">
+                    <label>模板名称</label>
+                    <input type="text" id="templateName" placeholder="例如: 负载均衡模板">
+                </div>
+                <div class="form-group">
+                    <label>模板描述</label>
+                    <input type="text" id="templateDescription" placeholder="例如: 自动选择最快节点，包含故障转移">
+                </div>
+                <div class="form-group">
+                    <label>YAML模板内容</label>
+                    <textarea id="templateContent" rows="15" placeholder="请输入Clash配置模板..."></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addTemplateModal')">取消</button>
+                <button class="btn btn-primary" onclick="addTemplate()">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑模板模态框 -->
+    <div id="editTemplateModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>编辑配置模板</h2>
+                <span class="close" onclick="closeModal('editTemplateModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>模板名称</label>
+                    <input type="text" id="editTemplateName">
+                </div>
+                <div class="form-group">
+                    <label>模板描述</label>
+                    <input type="text" id="editTemplateDescription">
+                </div>
+                <div class="form-group">
+                    <label>YAML模板内容</label>
+                    <textarea id="editTemplateContent" rows="15"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('editTemplateModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveTemplateEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 导入配置文件模态框 -->
+    <div id="importTemplateModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>导入配置文件</h2>
+                <span class="close" onclick="closeModal('importTemplateModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 <strong>导入说明：</strong></p>
+                    <ul style="margin: 5px 0 0 20px;">
+                        <li>上传现有的 Clash YAML 配置文件</li>
+                        <li>系统会自动提取 proxy-groups 和 rules</li>
+                        <li>所有实际节点会被替换为 <code>PROXY_NODES</code> 占位符</li>
+                        <li>DIRECT、REJECT 等特殊策略和策略组引用会被保留</li>
+                    </ul>
+                </div>
+                <div class="form-group">
+                    <label>模板名称</label>
+                    <input type="text" id="importTemplateName" placeholder="例如: 我的负载均衡配置">
+                </div>
+                <div class="form-group">
+                    <label>模板描述</label>
+                    <input type="text" id="importTemplateDescription" placeholder="例如: 从机场配置导入的负载均衡模板">
+                </div>
+                <div class="form-group">
+                    <label>选择配置文件</label>
+                    <input type="file" id="importTemplateFile" accept=".yaml,.yml" onchange="handleTemplateFileSelect(event)">
+                </div>
+                <div class="form-group" id="importPreviewContainer" style="display: none;">
+                    <label>文件预览（前50行）</label>
+                    <textarea id="importTemplatePreview" rows="10" readonly style="background: #f5f5f5;"></textarea>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('importTemplateModal')">取消</button>
+                <button class="btn btn-primary" onclick="importTemplateFromFile()" id="importTemplateBtn" disabled>导入</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 编辑节点模态框 -->
+    <div id="editNodeModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>编辑节点</h2>
+                <span class="close" onclick="closeModal('editNodeModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>节点名称</label>
+                    <input type="text" id="editNodeName">
+                </div>
+                <div class="form-group">
+                    <label>协议类型</label>
+                    <input type="text" id="editNodeProtocol" readonly style="background: #f5f5f5;">
+                </div>
+                <div id="editNodeConfigFields"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('editNodeModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveNodeEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 创建链式节点模态框 -->
+    <div id="createRelayModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>创建链式代理节点</h2>
+                <span class="close" onclick="closeModal('createRelayModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 选择要串联的代理节点。数据将按照您选择的顺序依次通过这些节点。</p>
+                    <p>⚠️ 链式代理默认禁用UDP，确保稳定性。</p>
+                </div>
+                <div class="form-group">
+                    <label>链式节点名称</label>
+                    <input type="text" id="relayNodeName" placeholder="例如: 香港-日本链式">
+                </div>
+                <div class="form-group">
+                    <label>所属分组（可选）</label>
+                    <select id="relayNodeSubscription">
+                        <option value="">不归属任何分组</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>选择代理节点（按顺序）</label>
+                    <div style="margin-bottom: 10px;">
+                        <small style="color: #666;">拖拽节点调整顺序，或点击上下箭头移动</small>
+                    </div>
+                    <div id="relayNodeSelection" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; min-height: 100px; max-height: 400px; overflow-y: auto;">
+                        <!-- 选中的节点将显示在这里 -->
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>可用节点</label>
+                    <div id="relayAvailableNodes" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 300px; overflow-y: auto;">
+                        <!-- 可用节点列表 -->
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('createRelayModal')">取消</button>
+                <button class="btn btn-primary" onclick="createRelayNode()">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 手动创建节点模态框 -->
+    <div id="manualCreateNodeModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>手动创建节点</h2>
+                <span class="close" onclick="closeModal('manualCreateNodeModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p>💡 手动创建节点无需分享链接，直接填写节点信息即可。</p>
+                </div>
+                <div class="form-group">
+                    <label>节点名称</label>
+                    <input type="text" id="manualNodeName" placeholder="例如: 香港节点-01">
+                </div>
+                <div class="form-group">
+                    <label>协议类型</label>
+                    <select id="manualNodeProtocol" onchange="updateManualNodeFields()">
+                        <option value="">请选择协议</option>
+                        <option value="ss">Shadowsocks (SS)</option>
+                        <option value="ssr">ShadowsocksR (SSR)</option>
+                        <option value="vmess">VMess</option>
+                        <option value="vless">VLESS</option>
+                        <option value="trojan">Trojan</option>
+                        <option value="hysteria2">Hysteria2</option>
+                        <option value="socks5">SOCKS5</option>
+                        <option value="http">HTTP/HTTPS</option>
+                    </select>
+                </div>
+                <div id="manualNodeConfigFields"></div>
+                <div class="form-group" id="manualNodeSubscriptionGroup">
+                    <label>所属分组（可选）</label>
+                    <select id="manualNodeSubscription">
+                        <option value="">不归属任何分组</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('manualCreateNodeModal')">取消</button>
+                <button class="btn btn-primary" onclick="createManualNode()">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+</body>
+</html>
+

@@ -1,0 +1,28 @@
+# Clash Meta 订阅转换器 - 示例订阅文件
+# 这个文件包含了各种协议的示例节点链接
+# 实际使用时，请替换为你自己的节点信息
+
+# Shadowsocks 节点示例
+ss://YWVzLTI1Ni1nY206dGVzdHBhc3N3b3JkQDEuMi4zLjQ6ODM4OA==#SS测试节点
+
+# VMess 节点示例（这是一个示例格式，需要替换为实际的 base64 编码内容）
+vmess://eyJ2IjoiMiIsInBzIjoi5rWL6K+VMeWPt-iKgueCuSIsImFkZCI6ImV4YW1wbGUuY29tIiwicG9ydCI6IjQ0MyIsImlkIjoiMTIzNDU2NzgtMTIzNC0xMjM0LTEyMzQtMTIzNDU2Nzg5YWJjIiwiYWlkIjoiMCIsInNjeSI6ImF1dG8iLCJuZXQiOiJ3cyIsInR5cGUiOiJub25lIiwiaG9zdCI6ImV4YW1wbGUuY29tIiwicGF0aCI6Ii9wYXRoIiwidGxzIjoidGxzIiwic25pIjoiZXhhbXBsZS5jb20ifQ==
+
+# VLESS 节点示例
+vless://12345678-1234-1234-1234-123456789abc@example.com:443?encryption=none&security=tls&sni=example.com&type=ws&host=example.com&path=%2Fpath#VLESS测试节点
+
+# Trojan 节点示例
+trojan://mypassword@example.com:443?sni=example.com#Trojan测试节点
+
+# HTTP 代理示例
+http://user:pass@proxy.example.com:8080#HTTP代理
+
+# HTTPS 代理示例
+https://proxy.example.com:8443#HTTPS代理
+
+# SOCKS5 代理示例
+socks5://user:pass@127.0.0.1:1080#SOCKS5代理
+
+# 注意：以上都是示例格式，实际使用时需要有效的节点信息
+# 你可以从你的代理服务提供商获取真实的订阅链接或节点信息
+

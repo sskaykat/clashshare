@@ -1,0 +1,100 @@
+# Clash Meta 配置文件示例
+# 这是转换器生成的配置文件结构参考
+
+mixed-port: 7890
+allow-lan: false
+mode: rule
+log-level: info
+external-controller: 127.0.0.1:9090
+
+dns:
+  enable: true
+  ipv6: false
+  enhanced-mode: fake-ip
+  fake-ip-range: 198.18.0.1/16
+  default-nameserver:
+    - 223.5.5.5
+    - 119.29.29.29
+  nameserver:
+    - https://doh.pub/dns-query
+    - https://dns.alidns.com/dns-query
+  fallback:
+    - https://1.1.1.1/dns-query
+    - https://dns.google/dns-query
+  fallback-filter:
+    geoip: true
+    geoip-code: CN
+
+proxies:
+  - name: "示例节点1"
+    type: vmess
+    server: example.com
+    port: 443
+    uuid: "12345678-1234-1234-1234-123456789abc"
+    alterId: 0
+    cipher: auto
+    tls: true
+    network: ws
+    ws-opts:
+      path: "/path"
+      headers:
+        Host: "example.com"
+
+proxy-groups:
+  - name: "🚀 节点选择"
+    type: select
+    proxies:
+      - "♻️ 自动选择"
+      - "🎯 全球直连"
+      - "示例节点1"
+
+  - name: "♻️ 自动选择"
+    type: url-test
+    proxies:
+      - "示例节点1"
+    url: http://www.gstatic.com/generate_204
+    interval: 300
+
+  - name: "📺 流媒体"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+      - "示例节点1"
+
+  - name: "🎯 全球直连"
+    type: select
+    proxies:
+      - DIRECT
+
+  - name: "🛑 广告拦截"
+    type: select
+    proxies:
+      - REJECT
+      - DIRECT
+
+  - name: "🐟 漏网之鱼"
+    type: select
+    proxies:
+      - "🚀 节点选择"
+      - "🎯 全球直连"
+
+rules:
+  # 广告拦截
+  - DOMAIN-KEYWORD,adservice,🛑 广告拦截
+  - DOMAIN-SUFFIX,googleadservices.com,🛑 广告拦截
+  
+  # 流媒体
+  - DOMAIN-KEYWORD,youtube,📺 流媒体
+  - DOMAIN-SUFFIX,netflix.com,📺 流媒体
+  
+  # 国内直连
+  - DOMAIN-SUFFIX,cn,🎯 全球直连
+  - GEOIP,CN,🎯 全球直连
+  
+  # 国外代理
+  - DOMAIN-KEYWORD,google,🚀 节点选择
+  - DOMAIN-SUFFIX,google.com,🚀 节点选择
+  
+  # 最终规则
+  - MATCH,🐟 漏网之鱼
+
