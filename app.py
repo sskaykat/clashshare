@@ -270,6 +270,13 @@ def manage_nodes():
     node.set_config(proxy)
     
     db.session.add(node)
+    
+    # 如果指定了订阅分组，添加到多对多关系
+    if subscription_id:
+        subscription = Subscription.query.get(subscription_id)
+        if subscription:
+            node.subscriptions.append(subscription)
+    
     db.session.commit()
     
     return jsonify({'success': True, 'id': node.id})
@@ -301,6 +308,11 @@ def batch_import_nodes():
         # 获取当前最大排序值，从1开始
         max_order = db.session.query(db.func.max(Node.order)).scalar() or 0
         
+        # 如果指定了订阅分组，先获取订阅对象
+        subscription = None
+        if subscription_id:
+            subscription = Subscription.query.get(subscription_id)
+        
         # 添加节点
         added_count = 0
         for proxy in proxies:
@@ -313,6 +325,11 @@ def batch_import_nodes():
             )
             node.set_config(proxy)
             db.session.add(node)
+            
+            # 添加到多对多关系
+            if subscription:
+                node.subscriptions.append(subscription)
+            
             added_count += 1
         
         db.session.commit()
@@ -446,6 +463,13 @@ def manual_create_node():
     node.set_config(config)
     
     db.session.add(node)
+    
+    # 如果指定了订阅分组，添加到多对多关系
+    if subscription_id:
+        subscription = Subscription.query.get(subscription_id)
+        if subscription:
+            node.subscriptions.append(subscription)
+    
     db.session.commit()
     
     return jsonify({'success': True, 'id': node.id})
@@ -486,6 +510,13 @@ def create_relay_node():
     node.set_config(config)
     
     db.session.add(node)
+    
+    # 如果指定了订阅分组，添加到多对多关系
+    if subscription_id:
+        subscription = Subscription.query.get(subscription_id)
+        if subscription:
+            node.subscriptions.append(subscription)
+    
     db.session.commit()
     
     return jsonify({'success': True, 'id': node.id})
