@@ -65,7 +65,7 @@ cd clashshare
 
 # 方法2: 下载 ZIP 文件后解压
 # 然后在命令行中进入项目目录
-cd dychange
+cd clashshare
 ```
 
 ### 第三步：安装依赖
