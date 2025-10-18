@@ -30,11 +30,13 @@ sudo ./install.sh
 
 ### 支持的系统
 
-- Ubuntu 18.04+
-- Debian 10+
+- Ubuntu 18.04+ (包括 Ubuntu 23.04+ 新版本)
+- Debian 10+ (包括 Debian 12+ 新版本)
 - CentOS 7+
 - RHEL 7+
 - Fedora 30+
+
+**注意**：Debian 12 和 Ubuntu 23.04+ 的 Python 包管理限制已自动处理
 
 ### 最低要求
 

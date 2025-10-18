@@ -198,8 +198,15 @@ install_python_dependencies() {
     cd "$INSTALL_DIR"
     
     if [[ -f "requirements.txt" ]]; then
-        pip3 install -r requirements.txt
-        print_success "Python依赖安装完成"
+        # 尝试正常安装
+        if pip3 install -r requirements.txt 2>/dev/null; then
+            print_success "Python依赖安装完成"
+        else
+            # 如果失败，尝试使用 --break-system-packages（Debian 12+, Ubuntu 23.04+）
+            print_warning "检测到系统包管理限制，使用 --break-system-packages 参数"
+            pip3 install -r requirements.txt --break-system-packages
+            print_success "Python依赖安装完成"
+        fi
     else
         print_error "未找到 requirements.txt 文件"
         exit 1
