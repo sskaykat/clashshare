@@ -134,6 +134,7 @@
                 <div class="tab-header">
                     <h1>🌐 节点管理</h1>
                     <div>
+                        <button class="btn btn-danger" id="batchDeleteBtn" onclick="batchDeleteNodes()" style="display: none;">🗑️ 批量删除</button>
                         <button class="btn btn-success" onclick="showBatchImportModal()">📥 批量导入</button>
                         <button class="btn btn-info" onclick="showManualCreateNodeModal()">✏️ 手动创建</button>
                         <button class="btn btn-primary" onclick="showAddNodeModal()">➕ 添加节点</button>
@@ -144,6 +145,9 @@
                     <table id="nodes-table">
                         <thead>
                             <tr>
+                                <th style="width: 40px;">
+                                    <input type="checkbox" id="selectAllNodes" onchange="toggleAllNodeSelection()" title="全选/取消全选">
+                                </th>
                                 <th>节点名称</th>
                                 <th>协议</th>
                                 <th>所属订阅</th>
@@ -640,43 +644,75 @@
     <div id="createRelayModal" class="modal">
         <div class="modal-content modal-large">
             <div class="modal-header">
-                <h2>创建链式代理节点</h2>
+                <h2>批量创建链式代理节点</h2>
                 <span class="close" onclick="closeModal('createRelayModal')">&times;</span>
             </div>
             <div class="modal-body">
                 <div class="info-box" style="margin-bottom: 15px;">
-                    <p>💡 选择要串联的代理节点。数据将按照您选择的顺序依次通过这些节点。</p>
-                    <p>⚠️ 链式代理默认禁用UDP，确保稳定性。</p>
+                    <p>💡 <strong>批量创建说明：</strong></p>
+                    <ul style="margin: 5px 0 0 20px;">
+                        <li>选择前置节点（入口）和后置节点（出口）</li>
+                        <li>系统会自动生成所有组合：前置 → 后置</li>
+                        <li>例如：2个前置 × 3个后置 = 6个链式节点</li>
+                    </ul>
                 </div>
+                
                 <div class="form-group">
-                    <label>链式节点名称</label>
-                    <input type="text" id="relayNodeName" placeholder="例如: 香港-日本链式">
+                    <label>命名模板（可选）</label>
+                    <input type="text" id="relayNodeNameTemplate" placeholder="例如: 链式 或留空使用 [前置]-[后置]">
+                    <small style="color: #666;">使用 [前置] 和 [后置] 作为占位符，例如：[前置]→[后置]</small>
                 </div>
+                
                 <div class="form-group">
                     <label>所属分组（可选）</label>
                     <select id="relayNodeSubscription">
                         <option value="">不归属任何分组</option>
                     </select>
                 </div>
+                
                 <div class="form-group">
-                    <label>选择代理节点（按顺序）</label>
-                    <div style="margin-bottom: 10px;">
-                        <small style="color: #666;">拖拽节点调整顺序，或点击上下箭头移动</small>
+                    <label style="display: flex; align-items: center; gap: 8px; cursor: pointer;">
+                        <input type="checkbox" id="relayEnableUdp" style="width: auto;">
+                        <span>启用 UDP 支持</span>
+                    </label>
+                    <small style="color: #666;">⚠️ UDP可能影响稳定性，建议仅在需要时启用（如游戏、视频通话等）</small>
+                </div>
+                
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+                    <!-- 前置节点选择 -->
+                    <div class="form-group">
+                        <label style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>🔵 前置节点（入口）</span>
+                            <button type="button" class="btn btn-secondary btn-small" onclick="toggleAllFrontNodes()">全选/取消</button>
+                        </label>
+                        <div id="relayFrontNodes" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 400px; overflow-y: auto; background: #f9f9f9;">
+                            <!-- 前置节点列表 -->
+                        </div>
+                        <small style="color: #666; margin-top: 5px; display: block;">已选: <span id="frontNodeCount">0</span> 个</small>
                     </div>
-                    <div id="relayNodeSelection" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; min-height: 100px; max-height: 400px; overflow-y: auto;">
-                        <!-- 选中的节点将显示在这里 -->
+                    
+                    <!-- 后置节点选择 -->
+                    <div class="form-group">
+                        <label style="display: flex; justify-content: space-between; align-items: center;">
+                            <span>🟢 后置节点（出口）</span>
+                            <button type="button" class="btn btn-secondary btn-small" onclick="toggleAllBackNodes()">全选/取消</button>
+                        </label>
+                        <div id="relayBackNodes" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 400px; overflow-y: auto; background: #f9f9f9;">
+                            <!-- 后置节点列表 -->
+                        </div>
+                        <small style="color: #666; margin-top: 5px; display: block;">已选: <span id="backNodeCount">0</span> 个</small>
                     </div>
                 </div>
-                <div class="form-group">
-                    <label>可用节点</label>
-                    <div id="relayAvailableNodes" style="border: 1px solid #ddd; border-radius: 4px; padding: 10px; max-height: 300px; overflow-y: auto;">
-                        <!-- 可用节点列表 -->
-                    </div>
+                
+                <div class="info-box" style="margin-top: 15px; background: #e8f5e9;">
+                    <p style="margin: 0; font-weight: bold;">
+                        📊 将生成 <span id="relayGenerateCount" style="color: #4caf50; font-size: 18px;">0</span> 个链式节点
+                    </p>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('createRelayModal')">取消</button>
-                <button class="btn btn-primary" onclick="createRelayNode()">创建</button>
+                <button class="btn btn-primary" onclick="batchCreateRelayNodes()">批量生成</button>
             </div>
         </div>
     </div>

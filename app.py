@@ -371,6 +371,38 @@ def update_node(node_id):
     return jsonify({'success': True})
 
 
+@app.route('/api/nodes/batch-delete', methods=['POST'])
+@login_required
+def batch_delete_nodes():
+    """批量删除节点"""
+    data = request.get_json()
+    node_ids = data.get('node_ids', [])
+    
+    if not node_ids:
+        return jsonify({'success': False, 'message': '未选择任何节点'}), 400
+    
+    try:
+        # 删除指定的节点
+        deleted_count = 0
+        for node_id in node_ids:
+            node = Node.query.get(node_id)
+            if node:
+                db.session.delete(node)
+                deleted_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'count': deleted_count,
+            'message': f'成功删除 {deleted_count} 个节点'
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
 @app.route('/api/nodes/<int:node_id>/detail', methods=['GET'])
 @login_required
 def get_node_detail(node_id):
@@ -520,6 +552,72 @@ def create_relay_node():
     db.session.commit()
     
     return jsonify({'success': True, 'id': node.id})
+
+
+@app.route('/api/nodes/batch-relay', methods=['POST'])
+@login_required
+def batch_create_relay_nodes():
+    """批量创建链式代理节点"""
+    data = request.get_json()
+    configs = data.get('configs', [])
+    subscription_id = data.get('subscription_id')
+    
+    if not configs:
+        return jsonify({'success': False, 'message': '配置列表不能为空'}), 400
+    
+    if not isinstance(configs, list):
+        return jsonify({'success': False, 'message': '配置必须是列表'}), 400
+    
+    try:
+        # 获取当前最大排序值
+        max_order = db.session.query(db.func.max(Node.order)).scalar() or 0
+        
+        # 如果指定了订阅分组，先获取订阅对象
+        subscription = None
+        if subscription_id:
+            subscription = Subscription.query.get(subscription_id)
+        
+        created_count = 0
+        for config in configs:
+            # 验证必要字段
+            if 'name' not in config or 'type' not in config or 'proxies' not in config:
+                continue
+            
+            if config['type'] != 'relay':
+                continue
+            
+            if not isinstance(config['proxies'], list) or len(config['proxies']) < 2:
+                continue
+            
+            # 创建relay节点
+            node = Node(
+                name=config['name'],
+                original_name=config['name'],
+                protocol='relay',
+                subscription_id=subscription_id,
+                order=max_order + created_count + 1
+            )
+            node.set_config(config)
+            
+            db.session.add(node)
+            
+            # 添加到多对多关系
+            if subscription:
+                node.subscriptions.append(subscription)
+            
+            created_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'count': created_count,
+            'message': f'成功创建 {created_count} 个链式节点'
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
 
 
 # ============ 用户管理 API ============

@@ -238,6 +238,9 @@ async function loadNodes() {
             
             const row = document.createElement('tr');
             row.innerHTML = `
+                <td style="text-align: center;">
+                    <input type="checkbox" class="node-checkbox" value="${node.id}" onchange="updateBatchDeleteButton()">
+                </td>
                 <td>
                     <strong>${node.name}</strong>
                     ${node.name !== node.original_name ? `<br><small style="color: #999;">原: ${node.original_name}</small>` : ''}
@@ -256,6 +259,10 @@ async function loadNodes() {
             `;
             tbody.appendChild(row);
         });
+        
+        // 重置全选框和批量删除按钮
+        document.getElementById('selectAllNodes').checked = false;
+        updateBatchDeleteButton();
     } catch (error) {
         console.error('加载节点失败:', error);
     }
@@ -400,6 +407,77 @@ async function deleteNode(id) {
         }
     } catch (error) {
         alert('删除失败: ' + error.message);
+    }
+}
+
+// ============ 批量删除节点功能 ============
+
+function toggleAllNodeSelection() {
+    const selectAllCheckbox = document.getElementById('selectAllNodes');
+    const checkboxes = document.querySelectorAll('.node-checkbox');
+    
+    checkboxes.forEach(checkbox => {
+        checkbox.checked = selectAllCheckbox.checked;
+    });
+    
+    updateBatchDeleteButton();
+}
+
+function updateBatchDeleteButton() {
+    const checkboxes = document.querySelectorAll('.node-checkbox:checked');
+    const batchDeleteBtn = document.getElementById('batchDeleteBtn');
+    
+    if (checkboxes.length > 0) {
+        batchDeleteBtn.style.display = 'inline-block';
+        batchDeleteBtn.textContent = `🗑️ 批量删除 (${checkboxes.length})`;
+    } else {
+        batchDeleteBtn.style.display = 'none';
+    }
+    
+    // 更新全选框的状态
+    const allCheckboxes = document.querySelectorAll('.node-checkbox');
+    const selectAllCheckbox = document.getElementById('selectAllNodes');
+    
+    if (allCheckboxes.length > 0) {
+        selectAllCheckbox.checked = checkboxes.length === allCheckboxes.length;
+        // 使用不确定状态表示部分选中
+        selectAllCheckbox.indeterminate = checkboxes.length > 0 && checkboxes.length < allCheckboxes.length;
+    }
+}
+
+async function batchDeleteNodes() {
+    const checkboxes = document.querySelectorAll('.node-checkbox:checked');
+    const nodeIds = Array.from(checkboxes).map(cb => parseInt(cb.value));
+    
+    if (nodeIds.length === 0) {
+        alert('请先选择要删除的节点');
+        return;
+    }
+    
+    if (!confirm(`确定要删除选中的 ${nodeIds.length} 个节点吗？此操作不可恢复！`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/api/nodes/batch-delete', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ node_ids: nodeIds })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(`✅ ${data.message}`);
+            loadNodes();
+            loadSubscriptions(); // 刷新订阅列表以更新节点数
+            loadUsers(); // 刷新用户列表以更新节点数
+            loadStats();
+        } else {
+            alert('❌ 删除失败: ' + data.message);
+        }
+    } catch (error) {
+        alert('❌ 删除失败: ' + error.message);
     }
 }
 
@@ -1712,154 +1790,188 @@ function showCreateRelayModal() {
         select.appendChild(option);
     });
     
-    // 重置选中的节点
-    selectedRelayNodes = [];
+    // 清空命名模板
+    document.getElementById('relayNodeNameTemplate').value = '';
     
-    // 渲染可用节点列表（排除relay类型的节点）
-    renderAvailableRelayNodes();
-    renderSelectedRelayNodes();
+    // 重置UDP选项（默认不启用）
+    document.getElementById('relayEnableUdp').checked = false;
     
-    // 清空名称
-    document.getElementById('relayNodeName').value = '';
+    // 渲染前置和后置节点列表
+    renderRelayNodeSelections();
     
     document.getElementById('createRelayModal').style.display = 'block';
 }
 
-function renderAvailableRelayNodes() {
-    const container = document.getElementById('relayAvailableNodes');
-    container.innerHTML = '';
-    
+function renderRelayNodeSelections() {
     // 筛选出非relay类型的节点
-    const availableNodes = allNodes.filter(node => 
-        node.protocol !== 'relay' && !selectedRelayNodes.find(n => n.id === node.id)
-    );
+    const availableNodes = allNodes.filter(node => node.protocol !== 'relay');
     
-    if (availableNodes.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">没有可用的节点</p>';
-        return;
-    }
+    // 渲染前置节点
+    const frontContainer = document.getElementById('relayFrontNodes');
+    frontContainer.innerHTML = '';
     
     availableNodes.forEach(node => {
         const div = document.createElement('div');
         div.className = 'node-item';
+        div.style.marginBottom = '8px';
         div.style.cursor = 'pointer';
         div.innerHTML = `
-            <div class="node-item-info">
+            <input type="checkbox" class="relay-front-checkbox" value="${node.id}" onchange="updateRelayCount()" style="margin-right: 8px;">
+            <div class="node-item-info" style="flex: 1;">
                 <div class="node-item-name">${node.name}</div>
                 <div class="node-item-meta">${node.protocol.toUpperCase()} • ${node.subscription_name}</div>
             </div>
-            <button class="btn btn-primary btn-small" onclick="addNodeToRelay(${node.id}); event.stopPropagation();">添加</button>
         `;
         
-        div.onclick = function() {
-            addNodeToRelay(node.id);
+        div.onclick = function(e) {
+            if (e.target.type !== 'checkbox') {
+                const checkbox = div.querySelector('input');
+                checkbox.checked = !checkbox.checked;
+                updateRelayCount();
+            }
         };
         
-        container.appendChild(div);
+        frontContainer.appendChild(div);
     });
-}
-
-function renderSelectedRelayNodes() {
-    const container = document.getElementById('relayNodeSelection');
-    container.innerHTML = '';
     
-    if (selectedRelayNodes.length === 0) {
-        container.innerHTML = '<p style="text-align: center; color: #999; padding: 20px;">请从下方添加节点</p>';
-        return;
-    }
+    // 渲染后置节点
+    const backContainer = document.getElementById('relayBackNodes');
+    backContainer.innerHTML = '';
     
-    selectedRelayNodes.forEach((node, index) => {
+    availableNodes.forEach(node => {
         const div = document.createElement('div');
         div.className = 'node-item';
         div.style.marginBottom = '8px';
+        div.style.cursor = 'pointer';
         div.innerHTML = `
-            <div style="display: flex; align-items: center; gap: 8px; width: 100%;">
-                <span style="font-weight: bold; color: #666; min-width: 30px;">${index + 1}.</span>
-                <div class="node-item-info" style="flex: 1;">
-                    <div class="node-item-name">${node.name}</div>
-                    <div class="node-item-meta">${node.protocol.toUpperCase()}</div>
-                </div>
-                <div style="display: flex; gap: 4px;">
-                    ${index > 0 ? `<button class="btn btn-secondary btn-small" onclick="moveRelayNodeUp(${index}); event.stopPropagation();">↑</button>` : ''}
-                    ${index < selectedRelayNodes.length - 1 ? `<button class="btn btn-secondary btn-small" onclick="moveRelayNodeDown(${index}); event.stopPropagation();">↓</button>` : ''}
-                    <button class="btn btn-danger btn-small" onclick="removeNodeFromRelay(${index}); event.stopPropagation();">移除</button>
-                </div>
+            <input type="checkbox" class="relay-back-checkbox" value="${node.id}" onchange="updateRelayCount()" style="margin-right: 8px;">
+            <div class="node-item-info" style="flex: 1;">
+                <div class="node-item-name">${node.name}</div>
+                <div class="node-item-meta">${node.protocol.toUpperCase()} • ${node.subscription_name}</div>
             </div>
         `;
         
-        container.appendChild(div);
+        div.onclick = function(e) {
+            if (e.target.type !== 'checkbox') {
+                const checkbox = div.querySelector('input');
+                checkbox.checked = !checkbox.checked;
+                updateRelayCount();
+            }
+        };
+        
+        backContainer.appendChild(div);
     });
+    
+    updateRelayCount();
 }
 
-function addNodeToRelay(nodeId) {
-    const node = allNodes.find(n => n.id === nodeId);
-    if (!node) return;
+function toggleAllFrontNodes() {
+    const checkboxes = document.querySelectorAll('.relay-front-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
     
-    // 检查是否已添加
-    if (selectedRelayNodes.find(n => n.id === nodeId)) {
-        alert('该节点已添加');
-        return;
-    }
+    checkboxes.forEach(cb => {
+        cb.checked = !allChecked;
+    });
     
-    selectedRelayNodes.push(node);
-    renderAvailableRelayNodes();
-    renderSelectedRelayNodes();
+    updateRelayCount();
 }
 
-function removeNodeFromRelay(index) {
-    selectedRelayNodes.splice(index, 1);
-    renderAvailableRelayNodes();
-    renderSelectedRelayNodes();
+function toggleAllBackNodes() {
+    const checkboxes = document.querySelectorAll('.relay-back-checkbox');
+    const allChecked = Array.from(checkboxes).every(cb => cb.checked);
+    
+    checkboxes.forEach(cb => {
+        cb.checked = !allChecked;
+    });
+    
+    updateRelayCount();
 }
 
-function moveRelayNodeUp(index) {
-    if (index === 0) return;
+function updateRelayCount() {
+    const frontChecked = document.querySelectorAll('.relay-front-checkbox:checked');
+    const backChecked = document.querySelectorAll('.relay-back-checkbox:checked');
     
-    const temp = selectedRelayNodes[index];
-    selectedRelayNodes[index] = selectedRelayNodes[index - 1];
-    selectedRelayNodes[index - 1] = temp;
+    const frontCount = frontChecked.length;
+    const backCount = backChecked.length;
+    const totalCount = frontCount * backCount;
     
-    renderSelectedRelayNodes();
+    document.getElementById('frontNodeCount').textContent = frontCount;
+    document.getElementById('backNodeCount').textContent = backCount;
+    document.getElementById('relayGenerateCount').textContent = totalCount;
 }
 
-function moveRelayNodeDown(index) {
-    if (index === selectedRelayNodes.length - 1) return;
-    
-    const temp = selectedRelayNodes[index];
-    selectedRelayNodes[index] = selectedRelayNodes[index + 1];
-    selectedRelayNodes[index + 1] = temp;
-    
-    renderSelectedRelayNodes();
-}
-
-async function createRelayNode() {
-    const name = document.getElementById('relayNodeName').value.trim();
+async function batchCreateRelayNodes() {
+    const nameTemplate = document.getElementById('relayNodeNameTemplate').value.trim();
     const subscription_id = document.getElementById('relayNodeSubscription').value || null;
+    const enableUdp = document.getElementById('relayEnableUdp').checked;
     
-    if (!name) {
-        alert('请输入链式节点名称');
+    // 获取选中的前置和后置节点
+    const frontCheckboxes = document.querySelectorAll('.relay-front-checkbox:checked');
+    const backCheckboxes = document.querySelectorAll('.relay-back-checkbox:checked');
+    
+    const frontNodeIds = Array.from(frontCheckboxes).map(cb => parseInt(cb.value));
+    const backNodeIds = Array.from(backCheckboxes).map(cb => parseInt(cb.value));
+    
+    // 验证
+    if (frontNodeIds.length === 0) {
+        alert('请至少选择一个前置节点');
         return;
     }
     
-    if (selectedRelayNodes.length < 2) {
-        alert('至少需要选择2个节点来创建链式代理');
+    if (backNodeIds.length === 0) {
+        alert('请至少选择一个后置节点');
         return;
     }
     
-    // 构建relay配置
-    const relayConfig = {
-        name: name,
-        type: 'relay',
-        proxies: selectedRelayNodes.map(n => n.name),
-        'disable-udp': true
-    };
+    // 获取节点信息
+    const frontNodes = frontNodeIds.map(id => allNodes.find(n => n.id === id)).filter(n => n);
+    const backNodes = backNodeIds.map(id => allNodes.find(n => n.id === id)).filter(n => n);
+    
+    const totalCount = frontNodes.length * backNodes.length;
+    
+    if (!confirm(`确定要生成 ${totalCount} 个链式节点吗？\n\n组合方式：\n${frontNodes.length} 个前置节点 × ${backNodes.length} 个后置节点 = ${totalCount} 个链式节点\nUDP支持：${enableUdp ? '已启用' : '已禁用'}`)) {
+        return;
+    }
+    
+    // 生成所有组合
+    const relayConfigs = [];
+    for (const frontNode of frontNodes) {
+        for (const backNode of backNodes) {
+            // 生成节点名称
+            let nodeName;
+            if (nameTemplate) {
+                nodeName = nameTemplate
+                    .replace(/\[前置\]/g, frontNode.name)
+                    .replace(/\[后置\]/g, backNode.name);
+            } else {
+                nodeName = `${frontNode.name}-${backNode.name}`;
+            }
+            
+            // 构建relay配置
+            const relayConfig = {
+                name: nodeName,
+                type: 'relay',
+                proxies: [frontNode.name, backNode.name]
+            };
+            
+            // 根据用户选择设置UDP
+            if (enableUdp) {
+                relayConfig.udp = true;
+            } else {
+                relayConfig['disable-udp'] = true;
+            }
+            
+            relayConfigs.push(relayConfig);
+        }
+    }
     
     try {
-        const response = await fetch('/api/nodes/relay', {
+        // 调用批量创建API
+        const response = await fetch('/api/nodes/batch-relay', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                config: relayConfig,
+                configs: relayConfigs,
                 subscription_id: subscription_id
             })
         });
@@ -1867,17 +1979,18 @@ async function createRelayNode() {
         const data = await response.json();
         
         if (data.success) {
+            alert(`✅ 成功创建 ${data.count} 个链式节点！`);
             closeModal('createRelayModal');
             loadRelayNodes();
-            loadNodes(); // 刷新所有节点列表
-            loadSubscriptions(); // 刷新订阅列表以更新节点数
-            loadUsers(); // 刷新用户列表以更新节点数
+            loadNodes();
+            loadSubscriptions();
+            loadUsers();
             loadStats();
         } else {
-            alert('❌ ' + data.message);
+            alert('❌ 创建失败: ' + data.message);
         }
     } catch (error) {
-        alert('创建失败: ' + error.message);
+        alert('❌ 创建失败: ' + error.message);
     }
 }
 
