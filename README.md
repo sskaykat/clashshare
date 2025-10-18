@@ -4,23 +4,9 @@
 
 ![示例图片](https://github.com/ODJ0930/clashshare/blob/main/example/4f0af236-ae40-4366-81d4-3440555b23c0.png?raw=true)
 
-## 🆕 包含 Web 管理界面
+## 🚀 一键安装（Linux 推荐）
 
-**功能**：
-- 🌐 完整的 Web 管理界面
-- 👤 用户管理系统（支持多用户共享订阅）
-- 📡 订阅自动更新
-- 🔗 独立的用户订阅接口
-- 📝 配置模板管理
-- 🔗 链式代理支持
-- 🔄 节点多分组支持
-- 🗑️ 节点批量删除
-
----
-
-## 🚀 一键安装（Linux）
-
-### 推荐方式：一键脚本
+### 快速开始：一键脚本
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/ODJ0930/clashshare/main/install.sh | sudo bash
@@ -91,6 +77,19 @@ sudo journalctl -u clashshare -f
 ```
 
 📖 **详细安装文档**: [INSTALL.md](INSTALL.md)
+
+---
+
+## 🆕 主要功能
+
+- 🌐 完整的 Web 管理界面
+- 👤 用户管理系统（支持多用户共享订阅）
+- 📡 订阅自动更新
+- 🔗 独立的用户订阅接口
+- 📝 配置模板管理
+- 🔗 链式代理支持（批量生成）
+- 🔄 节点多分组支持
+- 🗑️ 节点批量删除
 
 ---
 
