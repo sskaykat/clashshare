@@ -31,19 +31,6 @@ sudo ./install.sh
 - 📊 查看运行状态
 - 🎯 服务管理（启动/停止/重启）
 
-### 一键命令模式
-
-```bash
-# 直接安装
-sudo bash install.sh install
-
-# 更新程序
-sudo bash install.sh update
-
-# 卸载程序
-sudo bash install.sh uninstall
-```
-
 ### 安装后
 
 安装完成后，通过浏览器访问：
