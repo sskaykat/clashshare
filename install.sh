@@ -573,10 +573,22 @@ change_port() {
     fi
 }
 
+# 检查是否为交互式终端
+is_interactive() {
+    [[ -t 0 ]] && [[ -t 1 ]]
+}
+
 # 主程序
 main() {
     check_root
     detect_system
+    
+    # 如果不是交互式终端（如通过curl管道执行），直接安装
+    if ! is_interactive; then
+        print_info "检测到非交互式执行，开始自动安装..."
+        install_main
+        exit 0
+    fi
     
     while true; do
         show_menu
