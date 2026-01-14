@@ -1607,6 +1607,7 @@ function getProtocolFields(protocol) {
         'vless': [
             ...commonFields,
             { key: 'uuid', label: 'UUID', type: 'text', required: true, placeholder: '例如: 12345678-1234-1234-1234-123456789012' },
+            { key: 'encryption', label: '加密方式', type: 'text', placeholder: '例如: none 或 mlkem768x25519plus...', description: '新协议加密参数，通常为 none' },
             { key: 'flow', label: '流控', type: 'select', options: [
                 { value: '', label: '无' },
                 { value: 'xtls-rprx-vision', label: 'xtls-rprx-vision' },
