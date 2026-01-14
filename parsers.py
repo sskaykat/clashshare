@@ -378,6 +378,8 @@ class ProxyParser:
                 
                 # 加密方式
                 encryption = params.get('encryption', ['none'])[0]
+                if encryption and encryption != 'none':
+                    node['encryption'] = encryption
                 
                 # 传输协议
                 network = params.get('type', ['tcp'])[0]
