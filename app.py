@@ -222,19 +222,25 @@ def manage_nodes():
     if request.method == 'GET':
         # 按排序字段排序
         nodes = Node.query.order_by(Node.order.asc(), Node.id.asc()).all()
-        return jsonify([{
-            'id': n.id,
-            'name': n.name,
-            'original_name': n.original_name,
-            'protocol': n.protocol,
-            'subscription_id': n.subscription_id,  # 保留用于兼容性
-            'subscription_name': ', '.join([s.name for s in n.subscriptions]) if n.subscriptions else '手动添加',
-            'subscription_names': [s.name for s in n.subscriptions],  # 新增：所有订阅名称列表
-            'subscription_ids': [s.id for s in n.subscriptions],  # 新增：所有订阅ID列表
-            'user_names': list(set([u.username for s in n.subscriptions for u in s.users])) if n.subscriptions else [],
-            'order': n.order if hasattr(n, 'order') else 0,
-            'created_at': n.created_at.strftime('%Y-%m-%d %H:%M:%S')
-        } for n in nodes])
+        result = []
+        for n in nodes:
+            config = n.get_config()
+            dialer_proxy = config.get('dialer-proxy') if config else None
+            result.append({
+                'id': n.id,
+                'name': n.name,
+                'original_name': n.original_name,
+                'protocol': n.protocol,
+                'subscription_id': n.subscription_id,  # 保留用于兼容性
+                'subscription_name': ', '.join([s.name for s in n.subscriptions]) if n.subscriptions else '手动添加',
+                'subscription_names': [s.name for s in n.subscriptions],  # 新增：所有订阅名称列表
+                'subscription_ids': [s.id for s in n.subscriptions],  # 新增：所有订阅ID列表
+                'user_names': list(set([u.username for s in n.subscriptions for u in s.users])) if n.subscriptions else [],
+                'order': n.order if hasattr(n, 'order') else 0,
+                'dialer_proxy': dialer_proxy,  # 新增：dialer-proxy 前置节点名称
+                'created_at': n.created_at.strftime('%Y-%m-%d %H:%M:%S')
+            })
+        return jsonify(result)
     
     # POST - 添加单个节点
     data = request.get_json()
@@ -659,6 +665,92 @@ def batch_create_relay_nodes():
             'success': True,
             'count': created_count,
             'message': f'成功创建 {created_count} 个链式节点'
+        })
+    
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/nodes/batch-dialer-proxy', methods=['POST'])
+@login_required
+def batch_create_dialer_proxy_nodes():
+    """批量创建 dialer-proxy 链式代理节点（新方式）"""
+    data = request.get_json()
+    configs = data.get('configs', [])
+    subscription_id = data.get('subscription_id')
+    
+    if not configs:
+        return jsonify({'success': False, 'message': '配置列表不能为空'}), 400
+    
+    if not isinstance(configs, list):
+        return jsonify({'success': False, 'message': '配置必须是列表'}), 400
+    
+    try:
+        # 获取当前最大排序值
+        max_order = db.session.query(db.func.max(Node.order)).scalar() or 0
+        
+        # 如果指定了订阅分组，先获取订阅对象
+        subscription = None
+        if subscription_id:
+            subscription = Subscription.query.get(subscription_id)
+        
+        created_count = 0
+        for config in configs:
+            # 验证必要字段
+            if 'name' not in config or 'backNodeId' not in config or 'frontNodeName' not in config:
+                continue
+            
+            # 获取后置节点的完整配置
+            back_node = Node.query.get(config['backNodeId'])
+            if not back_node:
+                continue
+            
+            back_config = back_node.get_config()
+            
+            # 复制后置节点配置
+            new_config = back_config.copy()
+            
+            # 修改名称
+            new_config['name'] = config['name']
+            
+            # 添加 dialer-proxy 指向前置节点
+            new_config['dialer-proxy'] = config['frontNodeName']
+            
+            # 处理 UDP 设置
+            if config.get('enableUdp'):
+                new_config['udp'] = True
+                if 'disable-udp' in new_config:
+                    del new_config['disable-udp']
+            else:
+                new_config['disable-udp'] = True
+                if 'udp' in new_config:
+                    del new_config['udp']
+            
+            # 创建新节点
+            node = Node(
+                name=config['name'],
+                original_name=config['name'],
+                protocol=back_node.protocol,  # 保持原协议类型
+                subscription_id=subscription_id,
+                order=max_order + created_count + 1
+            )
+            node.set_config(new_config)
+            
+            db.session.add(node)
+            
+            # 添加到多对多关系
+            if subscription:
+                node.subscriptions.append(subscription)
+            
+            created_count += 1
+        
+        db.session.commit()
+        
+        return jsonify({
+            'success': True,
+            'count': created_count,
+            'message': f'成功创建 {created_count} 个 dialer-proxy 链式节点'
         })
     
     except Exception as e:

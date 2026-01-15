@@ -1726,8 +1726,8 @@ async function loadRelayNodes() {
         const response = await fetch('/api/nodes');
         const nodes = await response.json();
         
-        // 筛选出relay类型的节点
-        const relayNodes = nodes.filter(n => n.protocol === 'relay');
+        // 筛选出链式节点：旧的 relay 类型 或 新的 dialer-proxy 方式
+        const relayNodes = nodes.filter(n => n.protocol === 'relay' || n.dialer_proxy);
         
         const tbody = document.querySelector('#relay-nodes-table tbody');
         tbody.innerHTML = '';
@@ -1751,7 +1751,13 @@ async function loadRelayNodes() {
         
         relayNodes.forEach((node, index) => {
             const config = nodeDetails[index].config || {};
-            const proxyChain = config.proxies ? config.proxies.join(' → ') : '-';
+            // 显示链式路径：旧方式用 proxies 数组，新方式用 dialer-proxy
+            let proxyChain = '-';
+            if (config.proxies && Array.isArray(config.proxies)) {
+                proxyChain = config.proxies.join(' → ');
+            } else if (config['dialer-proxy']) {
+                proxyChain = `${config['dialer-proxy']} → ${node.name}`;
+            }
             
             // 显示所有关联的用户
             const userBadges = node.user_names && node.user_names.length > 0
@@ -1805,8 +1811,8 @@ function showCreateRelayModal() {
 }
 
 function renderRelayNodeSelections() {
-    // 筛选出非relay类型的节点
-    const availableNodes = allNodes.filter(node => node.protocol !== 'relay');
+    // 筛选出可用节点：非relay类型 且 没有dialer-proxy的节点
+    const availableNodes = allNodes.filter(node => node.protocol !== 'relay' && !node.dialer_proxy);
     
     // 渲染前置节点
     const frontContainer = document.getElementById('relayFrontNodes');
@@ -1925,18 +1931,18 @@ async function batchCreateRelayNodes() {
         return;
     }
     
-    // 获取节点信息
+    // 获取节点信息（需要完整配置）
     const frontNodes = frontNodeIds.map(id => allNodes.find(n => n.id === id)).filter(n => n);
     const backNodes = backNodeIds.map(id => allNodes.find(n => n.id === id)).filter(n => n);
     
     const totalCount = frontNodes.length * backNodes.length;
     
-    if (!confirm(`确定要生成 ${totalCount} 个链式节点吗？\n\n组合方式：\n${frontNodes.length} 个前置节点 × ${backNodes.length} 个后置节点 = ${totalCount} 个链式节点\nUDP支持：${enableUdp ? '已启用' : '已禁用'}`)) {
+    if (!confirm(`确定要生成 ${totalCount} 个链式节点吗？\n\n组合方式：\n${frontNodes.length} 个前置节点 × ${backNodes.length} 个后置节点 = ${totalCount} 个链式节点\nUDP支持：${enableUdp ? '已启用' : '已禁用'}\n\n注意：将使用 dialer-proxy 方式创建`)) {
         return;
     }
     
-    // 生成所有组合
-    const relayConfigs = [];
+    // 生成所有组合 - 使用 dialer-proxy 方式
+    const dialerProxyConfigs = [];
     for (const frontNode of frontNodes) {
         for (const backNode of backNodes) {
             // 生成节点名称
@@ -1949,31 +1955,25 @@ async function batchCreateRelayNodes() {
                 nodeName = `${frontNode.name}-${backNode.name}`;
             }
             
-            // 构建relay配置
-            const relayConfig = {
+            // 构建 dialer-proxy 配置：复制后置节点配置，添加 dialer-proxy 指向前置节点
+            const dialerConfig = {
                 name: nodeName,
-                type: 'relay',
-                proxies: [frontNode.name, backNode.name]
+                backNodeId: backNode.id,
+                frontNodeName: frontNode.name,
+                enableUdp: enableUdp
             };
             
-            // 根据用户选择设置UDP
-            if (enableUdp) {
-                relayConfig.udp = true;
-            } else {
-                relayConfig['disable-udp'] = true;
-            }
-            
-            relayConfigs.push(relayConfig);
+            dialerProxyConfigs.push(dialerConfig);
         }
     }
     
     try {
-        // 调用批量创建API
-        const response = await fetch('/api/nodes/batch-relay', {
+        // 调用批量创建API - 使用新的 dialer-proxy 方式
+        const response = await fetch('/api/nodes/batch-dialer-proxy', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                configs: relayConfigs,
+                configs: dialerProxyConfigs,
                 subscription_id: subscription_id
             })
         });
@@ -1981,7 +1981,7 @@ async function batchCreateRelayNodes() {
         const data = await response.json();
         
         if (data.success) {
-            alert(`✅ 成功创建 ${data.count} 个链式节点！`);
+            alert(`✅ 成功创建 ${data.count} 个链式节点（dialer-proxy 方式）！`);
             closeModal('createRelayModal');
             loadRelayNodes();
             loadNodes();

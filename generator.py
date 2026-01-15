@@ -30,13 +30,12 @@ class ClashConfigGenerator:
         if not proxies:
             raise ValueError("代理节点列表不能为空")
         
-        # 分离relay类型和普通代理节点
-        relay_groups = [p for p in proxies if p.get('type') == 'relay']
+        # 过滤掉旧的 relay 类型节点（已废弃）
         normal_proxies = [p for p in proxies if p.get('type') != 'relay']
         
         # 如果提供了模板，使用模板生成配置
         if template_content:
-            return self.generate_from_template(normal_proxies, relay_groups, template_content)
+            return self.generate_from_template(normal_proxies, template_content)
         
         # 否则使用默认配置
         config = {
@@ -47,21 +46,19 @@ class ClashConfigGenerator:
             'external-controller': '127.0.0.1:9090',
             'dns': self._generate_dns_config(),
             'proxies': normal_proxies,
-            'proxy-groups': self._generate_proxy_groups(normal_proxies, relay_groups, proxy_group_name) + relay_groups,
+            'proxy-groups': self._generate_proxy_groups(normal_proxies, proxy_group_name),
             'rules': self._generate_rules(proxy_group_name),
         }
         
         return config
     
     def generate_from_template(self, proxies: List[Dict[str, Any]], 
-                               relay_groups: List[Dict[str, Any]],
                                template_content: str) -> Dict[str, Any]:
         """
         根据模板生成配置
         
         Args:
-            proxies: 普通代理节点列表
-            relay_groups: relay类型的代理组列表
+            proxies: 代理节点列表
             template_content: YAML模板内容
         
         Returns:
@@ -71,22 +68,16 @@ class ClashConfigGenerator:
             # 解析模板
             template = yaml.safe_load(template_content)
             
-            # 替换 proxies 部分（只包含普通节点）
+            # 替换 proxies 部分
             template['proxies'] = proxies
             
             # 更新 proxy-groups 中的节点列表
             if 'proxy-groups' in template:
                 proxy_names = [p['name'] for p in proxies]
-                relay_names = [r['name'] for r in relay_groups]
-                # 将relay组添加到proxy-groups的末尾
                 template['proxy-groups'] = self._update_proxy_groups(
                     template['proxy-groups'], 
-                    proxy_names,
-                    relay_names
-                ) + relay_groups
-            else:
-                # 如果模板没有proxy-groups，添加relay组
-                template['proxy-groups'] = relay_groups
+                    proxy_names
+                )
             
             return template
             
@@ -94,25 +85,17 @@ class ClashConfigGenerator:
             raise ValueError(f"模板解析失败: {str(e)}")
     
     def _update_proxy_groups(self, groups: List[Dict[str, Any]], 
-                            proxy_names: List[str],
-                            relay_names: List[str] = None) -> List[Dict[str, Any]]:
+                            proxy_names: List[str]) -> List[Dict[str, Any]]:
         """
         更新代理组中的节点列表
         
         Args:
             groups: 原始代理组列表
-            proxy_names: 普通节点名称列表
-            relay_names: relay节点名称列表（可选）
+            proxy_names: 节点名称列表
         
         Returns:
             更新后的代理组列表
         """
-        if relay_names is None:
-            relay_names = []
-        
-        # 所有可用节点（普通节点 + relay节点）
-        all_node_names = proxy_names + relay_names
-        
         updated_groups = []
         
         for group in groups:
@@ -123,8 +106,8 @@ class ClashConfigGenerator:
                 new_proxies = []
                 for proxy in updated_group['proxies']:
                     if proxy == 'PROXY_NODES':
-                        # 替换为所有节点（包括relay节点）
-                        new_proxies.extend(all_node_names)
+                        # 替换为所有节点
+                        new_proxies.extend(proxy_names)
                     else:
                         new_proxies.append(proxy)
                 updated_group['proxies'] = new_proxies
@@ -194,31 +177,27 @@ class ClashConfigGenerator:
         }
     
     def _generate_proxy_groups(self, proxies: List[Dict[str, Any]], 
-                               relay_groups: List[Dict[str, Any]],
                                proxy_group_name: str) -> List[Dict[str, Any]]:
         """生成代理组配置"""
         proxy_names = [p['name'] for p in proxies]
-        relay_names = [r['name'] for r in relay_groups]
-        # 所有可用节点（普通节点 + relay节点）
-        all_node_names = proxy_names + relay_names
         
         groups = [
             {
                 'name': proxy_group_name,
                 'type': 'select',
-                'proxies': ['♻️ 自动选择', '🎯 全球直连'] + all_node_names,
+                'proxies': ['♻️ 自动选择', '🎯 全球直连'] + proxy_names,
             },
             {
                 'name': '♻️ 自动选择',
                 'type': 'url-test',
-                'proxies': proxy_names,  # url-test只包含普通节点，不包含relay
+                'proxies': proxy_names,
                 'url': 'http://www.gstatic.com/generate_204',
                 'interval': 300,
             },
             {
                 'name': '📺 流媒体',
                 'type': 'select',
-                'proxies': [proxy_group_name, '♻️ 自动选择'] + all_node_names,
+                'proxies': [proxy_group_name, '♻️ 自动选择'] + proxy_names,
             },
             {
                 'name': '🎯 全球直连',
