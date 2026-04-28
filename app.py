@@ -3,7 +3,7 @@
 Web 管理界面主程序
 """
 
-from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file
+from flask import Flask, render_template, request, jsonify, session, redirect, url_for, send_file, make_response
 from models import db, Admin, Subscription, Node, User, Template
 from parsers import ProxyParser
 from generator import ClashConfigGenerator
@@ -13,6 +13,15 @@ from datetime import timedelta
 from functools import wraps
 import requests as req
 import io
+import hashlib
+import time
+from urllib.parse import quote
+import yaml
+
+try:
+    from yaml import CDumper as YamlDumper
+except ImportError:
+    from yaml import Dumper as YamlDumper
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', secrets.token_hex(32))
@@ -21,6 +30,297 @@ app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 app.config['PERMANENT_SESSION_LIFETIME'] = timedelta(days=7)  # Session 保持 7 天
 
 db.init_app(app)
+
+SUBSCRIPTION_CACHE_MAX_SIZE = int(os.environ.get('SUBSCRIPTION_CACHE_MAX_SIZE', '256'))
+_subscription_cache = {}
+_subscription_cache_version = 0
+
+
+def _dump_yaml_bytes(config):
+    """使用 PyYAML C Dumper（可用时）生成 UTF-8 YAML。"""
+    yaml_content = yaml.dump(
+        config,
+        Dumper=YamlDumper,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False
+    )
+    return yaml_content.encode('utf-8')
+
+
+def _invalidate_subscription_cache(reason='api-write'):
+    """清空订阅缓存。"""
+    global _subscription_cache_version
+    _subscription_cache_version += 1
+    if _subscription_cache:
+        _subscription_cache.clear()
+    app.logger.debug("subscription cache invalidated: reason=%s version=%s", reason, _subscription_cache_version)
+
+
+def _get_subscription_cache(cache_type, entity_id):
+    cache_key = (cache_type, entity_id)
+    cache_entry = _subscription_cache.get(cache_key)
+    if not cache_entry:
+        return None
+
+    if cache_entry.get('version') != _subscription_cache_version:
+        _subscription_cache.pop(cache_key, None)
+        return None
+
+    return cache_entry
+
+
+def _store_subscription_cache(cache_type, entity_id, cache_entry):
+    cache_entry['version'] = _subscription_cache_version
+
+    if SUBSCRIPTION_CACHE_MAX_SIZE <= 0:
+        return cache_entry
+
+    if len(_subscription_cache) >= SUBSCRIPTION_CACHE_MAX_SIZE:
+        oldest_key = next(iter(_subscription_cache))
+        _subscription_cache.pop(oldest_key, None)
+
+    _subscription_cache[(cache_type, entity_id)] = cache_entry
+    return cache_entry
+
+
+def _request_etag_matches(etag):
+    header_value = request.headers.get('If-None-Match', '')
+    if not header_value:
+        return False
+
+    for candidate in header_value.split(','):
+        normalized = candidate.strip()
+        if normalized == '*':
+            return True
+        if normalized.startswith('W/'):
+            normalized = normalized[2:].strip()
+        if normalized.strip('"') == etag:
+            return True
+
+    return False
+
+
+def _apply_subscription_headers(response, cache_entry, cache_status):
+    encoded_filename = quote(cache_entry['filename'])
+    response.headers['Content-Type'] = 'text/yaml; charset=utf-8'
+    response.headers['Content-Disposition'] = (
+        f"attachment; filename={encoded_filename}; filename*=UTF-8''{encoded_filename}"
+    )
+    response.headers['Subscription-Userinfo'] = 'upload=0; download=0; total=0; expire=0'
+    response.headers['Cache-Control'] = 'no-cache, must-revalidate'
+    response.headers['X-Subscription-Cache'] = cache_status
+    response.headers['X-Subscription-Cache-Version'] = str(cache_entry['version'])
+    response.headers['X-Subscription-Bytes'] = str(cache_entry['yaml_bytes'])
+    response.set_etag(cache_entry['etag'])
+    return response
+
+
+def _make_subscription_response(cache_entry, cache_status):
+    if _request_etag_matches(cache_entry['etag']):
+        response = make_response('', 304)
+        return _apply_subscription_headers(response, cache_entry, 'NOT_MODIFIED')
+
+    response = make_response(cache_entry['body'], 200)
+    return _apply_subscription_headers(response, cache_entry, cache_status)
+
+
+def _log_subscription_timing(cache_type, name, cache_status, stats, started_at):
+    total_ms = (time.perf_counter() - started_at) * 1000
+    app.logger.info(
+        "subscription cache=%s type=%s name=%s nodes=%s proxies=%s bytes=%s "
+        "collect_ms=%.2f deps_ms=%.2f generate_ms=%.2f yaml_ms=%.2f total_ms=%.2f",
+        cache_status,
+        cache_type,
+        name,
+        stats.get('node_count', 0),
+        stats.get('proxy_count', 0),
+        stats.get('yaml_bytes', 0),
+        stats.get('collect_ms', 0),
+        stats.get('deps_ms', 0),
+        stats.get('generate_ms', 0),
+        stats.get('yaml_ms', 0),
+        total_ms
+    )
+
+
+def _build_subscription_cache_entry(cache_type, entity_id, name, filename, nodes, proxy_group_name, template_content):
+    stats = {}
+
+    deps_start = time.perf_counter()
+    proxies = _build_proxy_configs_with_chain_dependencies(nodes)
+    stats['deps_ms'] = (time.perf_counter() - deps_start) * 1000
+
+    generate_start = time.perf_counter()
+    generator = ClashConfigGenerator()
+    config = generator.generate(proxies, proxy_group_name, template_content)
+    stats['generate_ms'] = (time.perf_counter() - generate_start) * 1000
+
+    yaml_start = time.perf_counter()
+    yaml_body = _dump_yaml_bytes(config)
+    stats['yaml_ms'] = (time.perf_counter() - yaml_start) * 1000
+
+    stats['node_count'] = len(nodes)
+    stats['proxy_count'] = len(config.get('proxies', []))
+    stats['yaml_bytes'] = len(yaml_body)
+
+    cache_entry = {
+        'body': yaml_body,
+        'etag': hashlib.sha256(yaml_body).hexdigest(),
+        'filename': filename,
+        'name': name,
+        'yaml_bytes': len(yaml_body),
+        'stats': stats,
+    }
+
+    return _store_subscription_cache(cache_type, entity_id, cache_entry)
+
+
+@app.after_request
+def clear_subscription_cache_after_api_write(response):
+    if (
+        request.path.startswith('/api/')
+        and request.method in {'POST', 'PUT', 'DELETE'}
+        and response.status_code < 400
+    ):
+        _invalidate_subscription_cache(f'{request.method} {request.path}')
+
+    return response
+
+
+def _dedupe_preserve_order(items):
+    """按首次出现顺序去重。"""
+    seen = set()
+    result = []
+    for item in items:
+        if item and item not in seen:
+            seen.add(item)
+            result.append(item)
+    return result
+
+
+def _get_chain_dependency_names(config):
+    """提取链式节点依赖的前置/后置节点名称。"""
+    if not isinstance(config, dict):
+        return []
+
+    dependency_names = []
+
+    # 旧 relay 方式通过 proxies 数组引用前置和后置节点。
+    relay_proxies = config.get('proxies') if config.get('type') == 'relay' else None
+    if isinstance(relay_proxies, list):
+        dependency_names.extend([
+            proxy for proxy in relay_proxies
+            if isinstance(proxy, str) and proxy
+        ])
+
+    # 新 dialer-proxy 方式至少需要前置节点存在于 proxies 中。
+    dialer_proxy = config.get('dialer-proxy')
+    if isinstance(dialer_proxy, str) and dialer_proxy:
+        dependency_names.append(dialer_proxy)
+
+    # 新创建的链式节点会记录原始前置/后置节点，供订阅生成时隐藏写入。
+    explicit_dependencies = config.get('__chain_dependencies')
+    if isinstance(explicit_dependencies, list):
+        dependency_names.extend([
+            proxy for proxy in explicit_dependencies
+            if isinstance(proxy, str) and proxy
+        ])
+
+    return _dedupe_preserve_order(dependency_names)
+
+
+def _dedupe_nodes(nodes):
+    """按节点 ID 去重，避免用户聚合多个订阅时重复输出同一节点。"""
+    seen = set()
+    result = []
+    for node in nodes:
+        if node.id in seen:
+            continue
+        seen.add(node.id)
+        result.append(node)
+    return result
+
+
+def _find_nodes_by_name(names):
+    """按名称查找节点；同名时使用排序最靠前的节点。"""
+    ordered_names = _dedupe_preserve_order(names)
+    if not ordered_names:
+        return {}
+
+    nodes = Node.query.filter(Node.name.in_(ordered_names)).order_by(
+        Node.order.asc(),
+        Node.id.asc()
+    ).all()
+
+    nodes_by_name = {}
+    for node in nodes:
+        if node.name not in nodes_by_name:
+            nodes_by_name[node.name] = node
+
+    return nodes_by_name
+
+
+def _build_proxy_configs_with_chain_dependencies(nodes):
+    """
+    构建订阅输出节点。
+
+    传入的节点会作为可展示节点进入代理组；链式节点依赖的前置/后置节点
+    会以隐藏节点追加到 proxies 中，只用于满足客户端解析依赖。
+    """
+    visible_nodes = _dedupe_nodes(nodes)
+    visible_entries = []
+    proxy_configs = []
+    included_names = set()
+    pending_dependency_names = []
+
+    for node in visible_nodes:
+        config = node.get_config()
+        config_name = config.get('name') or node.name
+
+        visible_entries.append((config_name, config))
+        pending_dependency_names.extend(_get_chain_dependency_names(config))
+
+    dependency_name_set = set(_dedupe_preserve_order(pending_dependency_names))
+
+    for config_name, config in visible_entries:
+        if config_name in dependency_name_set:
+            config['__hidden'] = True
+
+        proxy_configs.append(config)
+
+        if config_name:
+            included_names.add(config_name)
+
+    while pending_dependency_names:
+        dependency_names = [
+            name for name in _dedupe_preserve_order(pending_dependency_names)
+            if name not in included_names
+        ]
+        pending_dependency_names = []
+
+        if not dependency_names:
+            break
+
+        dependency_nodes = _find_nodes_by_name(dependency_names)
+
+        for name in dependency_names:
+            dependency_node = dependency_nodes.get(name)
+            if not dependency_node:
+                continue
+
+            dependency_config = dependency_node.get_config()
+            dependency_name = dependency_config.get('name') or dependency_node.name
+            if dependency_name in included_names:
+                continue
+
+            dependency_config['__hidden'] = True
+            proxy_configs.append(dependency_config)
+            included_names.add(dependency_name)
+
+            pending_dependency_names.extend(_get_chain_dependency_names(dependency_config))
+
+    return proxy_configs
 
 
 def login_required(f):
@@ -716,6 +1016,14 @@ def batch_create_dialer_proxy_nodes():
             
             # 添加 dialer-proxy 指向前置节点
             new_config['dialer-proxy'] = config['frontNodeName']
+
+            # 记录链式依赖。生成订阅时会把这些节点隐藏写入 proxies，
+            # 但不会放进 proxy-groups 里展示。
+            back_node_name = back_config.get('name') or back_node.name
+            new_config['__chain_dependencies'] = _dedupe_preserve_order([
+                config['frontNodeName'],
+                back_node_name
+            ])
             
             # 处理 UDP 设置
             if config.get('enableUdp'):
@@ -907,6 +1215,9 @@ def regenerate_user_token(user_id):
 @app.route('/sub/user/<token>')
 def user_subscription(token):
     """用户订阅接口（支持自定义后缀和系统token）"""
+    started_at = time.perf_counter()
+    stats = {}
+
     # 先尝试用custom_slug查找，再用subscription_token查找
     user = User.query.filter_by(custom_slug=token).first()
     if not user:
@@ -914,11 +1225,18 @@ def user_subscription(token):
     
     if not user or not user.enabled:
         return "Invalid subscription", 404
+
+    cache_entry = _get_subscription_cache('user', user.id)
+    if cache_entry:
+        _log_subscription_timing('user', user.username, 'HIT', cache_entry.get('stats', {}), started_at)
+        return _make_subscription_response(cache_entry, 'HIT')
     
     # 获取用户的所有订阅下的所有节点，并按排序字段排序
+    collect_start = time.perf_counter()
     all_nodes = []
     for subscription in user.subscriptions:
         all_nodes.extend(subscription.nodes)
+    stats['collect_ms'] = (time.perf_counter() - collect_start) * 1000
     
     if not all_nodes:
         return "No nodes available", 404
@@ -926,41 +1244,35 @@ def user_subscription(token):
     # 按order字段排序节点
     all_nodes.sort(key=lambda n: (n.order if hasattr(n, 'order') and n.order is not None else 0, n.id))
     
-    # 获取所有节点配置
-    proxies = [node.get_config() for node in all_nodes]
-    
-    # 生成 Clash 配置
-    generator = ClashConfigGenerator()
-    
     # 如果用户设置了模板，使用模板生成
     template_content = None
     if user.template_id:
         template = Template.query.get(user.template_id)
         if template:
             template_content = template.content
-    
-    config = generator.generate(proxies, f"🚀 {user.username} 专属", template_content)
-    
-    # 转换为 YAML
-    import yaml
-    from urllib.parse import quote
-    yaml_content = yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    
-    # 对文件名进行URL编码以支持中文
+
     filename = f'clash_{user.username}.yaml'
-    encoded_filename = quote(filename)
-    
-    # 返回文件
-    return yaml_content, 200, {
-        'Content-Type': 'text/yaml; charset=utf-8',
-        'Content-Disposition': f"attachment; filename={encoded_filename}; filename*=UTF-8''{encoded_filename}",
-        'Subscription-Userinfo': f'upload=0; download=0; total=0; expire=0'
-    }
+    cache_entry = _build_subscription_cache_entry(
+        'user',
+        user.id,
+        user.username,
+        filename,
+        all_nodes,
+        f"🚀 {user.username} 专属",
+        template_content
+    )
+    cache_entry['stats']['collect_ms'] = stats['collect_ms']
+    _log_subscription_timing('user', user.username, 'MISS', cache_entry['stats'], started_at)
+
+    return _make_subscription_response(cache_entry, 'MISS')
 
 
 @app.route('/sub/subscription/<token>')
 def subscription_access(token):
     """订阅分组访问接口（支持自定义后缀和系统token）"""
+    started_at = time.perf_counter()
+    stats = {}
+
     # 先尝试用custom_slug查找，再用subscription_token查找
     subscription = Subscription.query.filter_by(custom_slug=token).first()
     if not subscription:
@@ -968,18 +1280,19 @@ def subscription_access(token):
     
     if not subscription:
         return "Invalid subscription", 404
+
+    cache_entry = _get_subscription_cache('subscription', subscription.id)
+    if cache_entry:
+        _log_subscription_timing('subscription', subscription.name, 'HIT', cache_entry.get('stats', {}), started_at)
+        return _make_subscription_response(cache_entry, 'HIT')
     
     if not subscription.nodes:
         return "No nodes available", 404
     
     # 按order字段排序节点
+    collect_start = time.perf_counter()
     sorted_nodes = sorted(subscription.nodes, key=lambda n: (n.order if hasattr(n, 'order') and n.order is not None else 0, n.id))
-    
-    # 获取订阅分组的所有节点配置
-    proxies = [node.get_config() for node in sorted_nodes]
-    
-    # 生成 Clash 配置
-    generator = ClashConfigGenerator()
+    stats['collect_ms'] = (time.perf_counter() - collect_start) * 1000
     
     # 如果订阅分组设置了模板，使用模板生成
     template_content = None
@@ -987,24 +1300,21 @@ def subscription_access(token):
         template = Template.query.get(subscription.template_id)
         if template:
             template_content = template.content
-    
-    config = generator.generate(proxies, f"📡 {subscription.name}", template_content)
-    
-    # 转换为 YAML
-    import yaml
-    from urllib.parse import quote
-    yaml_content = yaml.dump(config, default_flow_style=False, allow_unicode=True, sort_keys=False)
-    
-    # 对文件名进行URL编码以支持中文
+
     filename = f'clash_{subscription.name}.yaml'
-    encoded_filename = quote(filename)
-    
-    # 返回文件
-    return yaml_content, 200, {
-        'Content-Type': 'text/yaml; charset=utf-8',
-        'Content-Disposition': f"attachment; filename={encoded_filename}; filename*=UTF-8''{encoded_filename}",
-        'Subscription-Userinfo': f'upload=0; download=0; total=0; expire=0'
-    }
+    cache_entry = _build_subscription_cache_entry(
+        'subscription',
+        subscription.id,
+        subscription.name,
+        filename,
+        sorted_nodes,
+        f"📡 {subscription.name}",
+        template_content
+    )
+    cache_entry['stats']['collect_ms'] = stats['collect_ms']
+    _log_subscription_timing('subscription', subscription.name, 'MISS', cache_entry['stats'], started_at)
+
+    return _make_subscription_response(cache_entry, 'MISS')
 
 
 # ============ 模板管理 API ============
@@ -1190,7 +1500,13 @@ def import_template():
                 new_config[key] = value
         
         # 转换回YAML
-        template_content = yaml.dump(new_config, default_flow_style=False, allow_unicode=True, sort_keys=False)
+        template_content = yaml.dump(
+            new_config,
+            Dumper=YamlDumper,
+            default_flow_style=False,
+            allow_unicode=True,
+            sort_keys=False
+        )
         
         # 保存模板
         template = Template(
@@ -1475,4 +1791,3 @@ if __name__ == '__main__':
     print("="*60 + "\n")
     
     app.run(debug=False, host='0.0.0.0', port=port)
-

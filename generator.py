@@ -6,6 +6,11 @@ Clash Meta 配置生成器
 import yaml
 from typing import List, Dict, Any
 
+try:
+    from yaml import CDumper as YamlDumper
+except ImportError:
+    from yaml import Dumper as YamlDumper
+
 
 class ClashConfigGenerator:
     """Clash Meta 配置生成器"""
@@ -30,12 +35,20 @@ class ClashConfigGenerator:
         if not proxies:
             raise ValueError("代理节点列表不能为空")
         
-        # 过滤掉旧的 relay 类型节点（已废弃）
-        normal_proxies = [p for p in proxies if p.get('type') != 'relay']
+        prepared_proxies = self._prepare_proxies(proxies)
+        output_proxies = prepared_proxies['output']
+        selectable_proxies = prepared_proxies['selectable']
+
+        if not selectable_proxies:
+            raise ValueError("可展示的代理节点列表不能为空")
         
         # 如果提供了模板，使用模板生成配置
         if template_content:
-            return self.generate_from_template(normal_proxies, template_content)
+            return self.generate_from_template(
+                output_proxies,
+                template_content,
+                selectable_proxies
+            )
         
         # 否则使用默认配置
         config = {
@@ -45,21 +58,65 @@ class ClashConfigGenerator:
             'log-level': 'info',
             'external-controller': '127.0.0.1:9090',
             'dns': self._generate_dns_config(),
-            'proxies': normal_proxies,
-            'proxy-groups': self._generate_proxy_groups(normal_proxies, proxy_group_name),
+            'proxies': output_proxies,
+            'proxy-groups': self._generate_proxy_groups(selectable_proxies, proxy_group_name),
             'rules': self._generate_rules(proxy_group_name),
         }
         
         return config
     
+    def _prepare_proxies(self, proxies: List[Dict[str, Any]]) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        拆分最终输出节点和代理组可展示节点。
+
+        链式节点可能依赖额外的前置/后置节点。依赖节点需要写入
+        proxies 以便客户端解析，但不应该进入 proxy-groups，避免
+        在客户端选择列表中单独显示。
+        """
+        output_proxies = []
+        selectable_proxies = []
+        seen_names = set()
+
+        for proxy in proxies:
+            if not isinstance(proxy, dict):
+                continue
+
+            is_hidden = proxy.get('__hidden') is True
+            cleaned_proxy = self._strip_internal_fields(proxy)
+            proxy_name = cleaned_proxy.get('name')
+
+            if not proxy_name or proxy_name in seen_names:
+                continue
+
+            seen_names.add(proxy_name)
+            output_proxies.append(cleaned_proxy)
+
+            if not is_hidden:
+                selectable_proxies.append(cleaned_proxy)
+
+        return {
+            'output': output_proxies,
+            'selectable': selectable_proxies,
+        }
+
+    def _strip_internal_fields(self, proxy: Dict[str, Any]) -> Dict[str, Any]:
+        """移除仅供服务端使用的内部字段，避免写入 Clash 配置。"""
+        return {
+            key: value
+            for key, value in proxy.items()
+            if not str(key).startswith('__')
+        }
+
     def generate_from_template(self, proxies: List[Dict[str, Any]], 
-                               template_content: str) -> Dict[str, Any]:
+                               template_content: str,
+                               selectable_proxies: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
         根据模板生成配置
         
         Args:
             proxies: 代理节点列表
             template_content: YAML模板内容
+            selectable_proxies: 代理组中可展示的节点列表
         
         Returns:
             完整的配置字典
@@ -73,7 +130,8 @@ class ClashConfigGenerator:
             
             # 更新 proxy-groups 中的节点列表
             if 'proxy-groups' in template:
-                proxy_names = [p['name'] for p in proxies]
+                group_proxies = selectable_proxies if selectable_proxies is not None else proxies
+                proxy_names = [p['name'] for p in group_proxies]
                 template['proxy-groups'] = self._update_proxy_groups(
                     template['proxy-groups'], 
                     proxy_names
@@ -305,8 +363,9 @@ class ClashConfigGenerator:
         yaml.add_representer(str, str_representer)
         
         with open(output_path, 'w', encoding='utf-8') as f:
-            yaml.dump(config, f, 
-                     default_flow_style=False, 
+            yaml.dump(config, f,
+                     Dumper=YamlDumper,
+                     default_flow_style=False,
                      allow_unicode=True,
                      sort_keys=False,
                      width=float("inf"))
@@ -345,4 +404,3 @@ class ClashConfigGenerator:
             return False
         
         return True
-
