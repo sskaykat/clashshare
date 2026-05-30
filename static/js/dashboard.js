@@ -371,32 +371,20 @@ async function batchImportNodes() {
 async function exportNode(id) {
     try {
         const response = await fetch(`/api/nodes/${id}/export`);
-        if (!response.ok) {
-            let message = '导出失败';
-            try {
-                const data = await response.json();
-                message = data.message || message;
-            } catch (_) {}
-            alert(message);
+        const data = await response.json();
+
+        if (!response.ok || !data.success) {
+            alert(data.message || '导出失败');
             return;
         }
 
-        const blob = await response.blob();
-        const disposition = response.headers.get('Content-Disposition') || '';
-        const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i);
-        const plainFilename = disposition.match(/filename="?([^";]+)"?/i);
-        const filename = encodedFilename
-            ? decodeURIComponent(encodedFilename[1])
-            : (plainFilename ? plainFilename[1] : `node-${id}.yaml`);
-
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
+        const shareUrl = data.url;
+        if (navigator.clipboard && window.isSecureContext) {
+            await navigator.clipboard.writeText(shareUrl);
+            alert('✅ 节点分享链接已复制，可直接粘贴到 v2rayN / v2rayNG 等客户端导入');
+        } else {
+            window.prompt('复制以下节点分享链接:', shareUrl);
+        }
     } catch (error) {
         alert('导出失败: ' + error.message);
     }

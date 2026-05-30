@@ -67,6 +67,327 @@ class ProxyParser:
             return True
         except ValueError:
             return False
+
+    @staticmethod
+    def _b64_encode(value: str, urlsafe: bool = False) -> str:
+        data = str(value).encode('utf-8')
+        encoder = base64.urlsafe_b64encode if urlsafe else base64.b64encode
+        return encoder(data).decode('utf-8').rstrip('=')
+
+    @staticmethod
+    def _format_host(host: Any) -> str:
+        host_text = str(host or '').strip()
+        if ':' in host_text and not host_text.startswith('[') and not host_text.endswith(']'):
+            return f'[{host_text}]'
+        return host_text
+
+    @staticmethod
+    def _append_param(params: List[tuple], key: str, value: Any):
+        if value is None or value == '':
+            return
+        params.append((key, str(value)))
+
+    @staticmethod
+    def _append_bool_param(params: List[tuple], key: str, value: Any, true_value: str = '1'):
+        parsed = ProxyParser._parse_bool(value)
+        if parsed is True:
+            params.append((key, true_value))
+
+    @staticmethod
+    def _build_query(params: List[tuple]) -> str:
+        return urllib.parse.urlencode(params, doseq=False, safe=',:/')
+
+    @staticmethod
+    def _append_fragment(link: str, name: Any) -> str:
+        if not name:
+            return link
+        return f'{link}#{urllib.parse.quote(str(name), safe="")}'
+
+    @staticmethod
+    def _require_fields(proxy: Dict[str, Any], *fields: str):
+        missing = [field for field in fields if proxy.get(field) in (None, '')]
+        if missing:
+            raise ValueError(f"节点缺少导出分享链接所需字段: {', '.join(missing)}")
+
+    @staticmethod
+    def to_share_url(proxy: Dict[str, Any]) -> str:
+        """将节点配置导出为可被常见客户端导入的分享链接。"""
+        if not isinstance(proxy, dict):
+            raise ValueError("节点配置无效")
+
+        proxy_type = str(proxy.get('type', '')).lower()
+        exporters = {
+            'ss': ProxyParser._to_ss_url,
+            'ssr': ProxyParser._to_ssr_url,
+            'vmess': ProxyParser._to_vmess_url,
+            'vless': ProxyParser._to_vless_url,
+            'trojan': ProxyParser._to_trojan_url,
+            'hysteria2': ProxyParser._to_hysteria2_url,
+            'hy2': ProxyParser._to_hysteria2_url,
+            'anytls': ProxyParser._to_anytls_url,
+            'http': ProxyParser._to_http_url,
+            'socks4': ProxyParser._to_socks_url,
+            'socks5': ProxyParser._to_socks_url,
+        }
+
+        exporter = exporters.get(proxy_type)
+        if not exporter:
+            raise ValueError(f"{proxy_type or '未知'} 类型没有标准分享链接格式")
+
+        return exporter(proxy)
+
+    @staticmethod
+    def _to_ss_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'cipher', 'password')
+        host = ProxyParser._format_host(proxy['server'])
+        userinfo = ProxyParser._b64_encode(f"{proxy['cipher']}:{proxy['password']}", urlsafe=True)
+        params = []
+
+        ProxyParser._append_bool_param(params, 'udp', proxy.get('udp'), true_value='true')
+        ProxyParser._append_bool_param(params, 'uot', proxy.get('udp-over-tcp'), true_value='true')
+
+        plugin = proxy.get('plugin')
+        plugin_opts = proxy.get('plugin-opts') if isinstance(proxy.get('plugin-opts'), dict) else {}
+        if plugin:
+            plugin_parts = [str(plugin)]
+            plugin_key_map = {
+                'mode': 'mode',
+                'host': 'host',
+                'path': 'path',
+                'tls': 'tls',
+                'mux': 'mux',
+                'skip-cert-verify': 'skip-cert-verify',
+                'password': 'password',
+                'version': 'version',
+                'version-hint': 'version-hint',
+                'restls-script': 'restls-script',
+            }
+            for opt_key, plugin_key in plugin_key_map.items():
+                if opt_key in plugin_opts and plugin_opts[opt_key] not in (None, ''):
+                    plugin_parts.append(f"{plugin_key}={plugin_opts[opt_key]}")
+            params.append(('plugin', ';'.join(plugin_parts)))
+
+        link = f"ss://{userinfo}@{host}:{proxy['port']}"
+        query = ProxyParser._build_query(params)
+        if query:
+            link = f'{link}?{query}'
+        return ProxyParser._append_fragment(link, proxy.get('name'))
+
+    @staticmethod
+    def _to_ssr_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'cipher', 'password', 'protocol', 'obfs')
+        password_b64 = ProxyParser._b64_encode(proxy['password'], urlsafe=True)
+        params = [
+            ('remarks', ProxyParser._b64_encode(proxy.get('name', ''), urlsafe=True)),
+        ]
+        if proxy.get('obfs-param'):
+            params.append(('obfsparam', ProxyParser._b64_encode(proxy['obfs-param'], urlsafe=True)))
+        if proxy.get('protocol-param'):
+            params.append(('protoparam', ProxyParser._b64_encode(proxy['protocol-param'], urlsafe=True)))
+
+        main = (
+            f"{proxy['server']}:{proxy['port']}:{proxy['protocol']}:"
+            f"{proxy['cipher']}:{proxy['obfs']}:{password_b64}/?{ProxyParser._build_query(params)}"
+        )
+        return f"ssr://{ProxyParser._b64_encode(main, urlsafe=True)}"
+
+    @staticmethod
+    def _to_vmess_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'uuid')
+        network = proxy.get('network', 'tcp')
+        config = {
+            'v': '2',
+            'ps': proxy.get('name', ''),
+            'add': proxy.get('server', ''),
+            'port': str(proxy.get('port', '')),
+            'id': proxy.get('uuid', ''),
+            'aid': str(proxy.get('alterId', 0)),
+            'scy': proxy.get('cipher', 'auto'),
+            'net': network,
+            'type': 'none',
+            'host': '',
+            'path': '',
+            'tls': 'tls' if proxy.get('tls') else '',
+        }
+
+        servername = proxy.get('servername') or proxy.get('sni')
+        if servername:
+            config['sni'] = servername
+
+        if network == 'ws':
+            ws_opts = proxy.get('ws-opts') if isinstance(proxy.get('ws-opts'), dict) else {}
+            config['path'] = ws_opts.get('path', '/')
+            headers = ws_opts.get('headers') if isinstance(ws_opts.get('headers'), dict) else {}
+            config['host'] = headers.get('Host', '')
+        elif network == 'grpc':
+            grpc_opts = proxy.get('grpc-opts') if isinstance(proxy.get('grpc-opts'), dict) else {}
+            config['path'] = grpc_opts.get('grpc-service-name', '')
+        elif network == 'h2':
+            h2_opts = proxy.get('h2-opts') if isinstance(proxy.get('h2-opts'), dict) else {}
+            config['path'] = h2_opts.get('path', '/')
+            h2_host = h2_opts.get('host') if isinstance(h2_opts.get('host'), list) else []
+            config['host'] = h2_host[0] if h2_host else ''
+
+        return f"vmess://{ProxyParser._b64_encode(json.dumps(config, ensure_ascii=False, separators=(',', ':')))}"
+
+    @staticmethod
+    def _to_vless_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'uuid')
+        host = ProxyParser._format_host(proxy['server'])
+        params = [('encryption', proxy.get('encryption') or 'none')]
+
+        network = proxy.get('network') or 'tcp'
+        if network == 'http':
+            params.append(('type', 'tcp'))
+            params.append(('headerType', 'http'))
+        else:
+            params.append(('type', network))
+
+        ProxyParser._append_param(params, 'flow', proxy.get('flow'))
+
+        reality_opts = proxy.get('reality-opts') if isinstance(proxy.get('reality-opts'), dict) else {}
+        if reality_opts:
+            params.append(('security', 'reality'))
+        elif proxy.get('tls'):
+            params.append(('security', 'tls'))
+
+        servername = proxy.get('servername') or proxy.get('sni')
+        ProxyParser._append_param(params, 'sni', servername)
+        ProxyParser._append_bool_param(params, 'allowInsecure', proxy.get('skip-cert-verify'))
+        ProxyParser._append_param(params, 'fp', proxy.get('client-fingerprint'))
+        ProxyParser._append_param(params, 'pbk', reality_opts.get('public-key'))
+        ProxyParser._append_param(params, 'sid', reality_opts.get('short-id'))
+
+        if network == 'ws':
+            ws_opts = proxy.get('ws-opts') if isinstance(proxy.get('ws-opts'), dict) else {}
+            ProxyParser._append_param(params, 'path', ws_opts.get('path'))
+            headers = ws_opts.get('headers') if isinstance(ws_opts.get('headers'), dict) else {}
+            ProxyParser._append_param(params, 'host', headers.get('Host'))
+        elif network == 'grpc':
+            grpc_opts = proxy.get('grpc-opts') if isinstance(proxy.get('grpc-opts'), dict) else {}
+            ProxyParser._append_param(params, 'serviceName', grpc_opts.get('grpc-service-name'))
+        elif network in {'h2', 'http'}:
+            opts_key = 'h2-opts' if network == 'h2' else 'http-opts'
+            opts = proxy.get(opts_key) if isinstance(proxy.get(opts_key), dict) else {}
+            path_value = opts.get('path')
+            if isinstance(path_value, list):
+                path_value = path_value[0] if path_value else None
+            ProxyParser._append_param(params, 'path', path_value)
+
+        query = ProxyParser._build_query(params)
+        link = f"vless://{urllib.parse.quote(str(proxy['uuid']), safe='')}@{host}:{proxy['port']}?{query}"
+        return ProxyParser._append_fragment(link, proxy.get('name'))
+
+    @staticmethod
+    def _to_trojan_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'password')
+        host = ProxyParser._format_host(proxy['server'])
+        params = []
+
+        reality_opts = proxy.get('reality-opts') if isinstance(proxy.get('reality-opts'), dict) else {}
+        if reality_opts:
+            params.append(('security', 'reality'))
+
+        ProxyParser._append_param(params, 'sni', proxy.get('sni') or proxy.get('servername'))
+        if isinstance(proxy.get('alpn'), list) and proxy['alpn']:
+            params.append(('alpn', ','.join(proxy['alpn'])))
+        ProxyParser._append_param(params, 'fp', proxy.get('client-fingerprint'))
+        ProxyParser._append_param(params, 'fingerprint', proxy.get('fingerprint'))
+        ProxyParser._append_bool_param(params, 'allowInsecure', proxy.get('skip-cert-verify'))
+        ProxyParser._append_bool_param(params, 'udp', proxy.get('udp'))
+        ProxyParser._append_param(params, 'pbk', reality_opts.get('public-key'))
+        ProxyParser._append_param(params, 'sid', reality_opts.get('short-id'))
+
+        network = proxy.get('network')
+        if network:
+            params.append(('type', network))
+            if network == 'ws':
+                ws_opts = proxy.get('ws-opts') if isinstance(proxy.get('ws-opts'), dict) else {}
+                ProxyParser._append_param(params, 'path', ws_opts.get('path'))
+                headers = ws_opts.get('headers') if isinstance(ws_opts.get('headers'), dict) else {}
+                ProxyParser._append_param(params, 'host', headers.get('Host'))
+            elif network == 'grpc':
+                grpc_opts = proxy.get('grpc-opts') if isinstance(proxy.get('grpc-opts'), dict) else {}
+                ProxyParser._append_param(params, 'serviceName', grpc_opts.get('grpc-service-name'))
+
+        link = f"trojan://{urllib.parse.quote(str(proxy['password']), safe='')}@{host}:{proxy['port']}"
+        query = ProxyParser._build_query(params)
+        if query:
+            link = f'{link}?{query}'
+        return ProxyParser._append_fragment(link, proxy.get('name'))
+
+    @staticmethod
+    def _to_hysteria2_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'password')
+        host = ProxyParser._format_host(proxy['server'])
+        params = []
+
+        ProxyParser._append_param(params, 'sni', proxy.get('sni'))
+        ProxyParser._append_bool_param(params, 'insecure', proxy.get('skip-cert-verify'))
+        ProxyParser._append_param(params, 'obfs', proxy.get('obfs'))
+        ProxyParser._append_param(params, 'obfs-password', proxy.get('obfs-password'))
+        ProxyParser._append_param(params, 'pinSHA256', proxy.get('pinSHA256') or proxy.get('fingerprint'))
+        if isinstance(proxy.get('alpn'), list) and proxy['alpn']:
+            params.append(('alpn', ','.join(proxy['alpn'])))
+        ProxyParser._append_param(params, 'upmbps', proxy.get('up'))
+        ProxyParser._append_param(params, 'downmbps', proxy.get('down'))
+
+        link = f"hysteria2://{urllib.parse.quote(str(proxy['password']), safe='')}@{host}:{proxy['port']}/"
+        query = ProxyParser._build_query(params)
+        if query:
+            link = f'{link}?{query}'
+        return ProxyParser._append_fragment(link, proxy.get('name'))
+
+    @staticmethod
+    def _to_anytls_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port', 'password')
+        host = ProxyParser._format_host(proxy['server'])
+        params = []
+
+        ProxyParser._append_param(params, 'sni', proxy.get('sni'))
+        ProxyParser._append_bool_param(params, 'insecure', proxy.get('skip-cert-verify'))
+        ProxyParser._append_param(params, 'fp', proxy.get('client-fingerprint'))
+        if isinstance(proxy.get('alpn'), list) and proxy['alpn']:
+            params.append(('alpn', ','.join(proxy['alpn'])))
+        ProxyParser._append_param(params, 'idle-session-check-interval', proxy.get('idle-session-check-interval'))
+        ProxyParser._append_param(params, 'idle-session-timeout', proxy.get('idle-session-timeout'))
+        ProxyParser._append_param(params, 'min-idle-session', proxy.get('min-idle-session'))
+        ProxyParser._append_bool_param(params, 'udp', proxy.get('udp'))
+        ProxyParser._append_bool_param(params, 'tfo', proxy.get('tfo'))
+
+        link = f"anytls://{urllib.parse.quote(str(proxy['password']), safe='')}@{host}:{proxy['port']}/"
+        query = ProxyParser._build_query(params)
+        if query:
+            link = f'{link}?{query}'
+        return ProxyParser._append_fragment(link, proxy.get('name'))
+
+    @staticmethod
+    def _to_http_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port')
+        scheme = 'https' if proxy.get('tls') else 'http'
+        host = ProxyParser._format_host(proxy['server'])
+        auth = ''
+        if proxy.get('username') or proxy.get('password'):
+            auth = urllib.parse.quote(str(proxy.get('username', '')), safe='')
+            if proxy.get('password') is not None:
+                auth += f":{urllib.parse.quote(str(proxy.get('password', '')), safe='')}"
+            auth += '@'
+        link = f"{scheme}://{auth}{host}:{proxy['port']}"
+        return ProxyParser._append_fragment(link, proxy.get('name'))
+
+    @staticmethod
+    def _to_socks_url(proxy: Dict[str, Any]) -> str:
+        ProxyParser._require_fields(proxy, 'name', 'server', 'port')
+        scheme = str(proxy.get('type') or 'socks5').lower()
+        host = ProxyParser._format_host(proxy['server'])
+        auth = ''
+        if proxy.get('username') or proxy.get('password'):
+            auth = urllib.parse.quote(str(proxy.get('username', '')), safe='')
+            if proxy.get('password') is not None:
+                auth += f":{urllib.parse.quote(str(proxy.get('password', '')), safe='')}"
+            auth += '@'
+        link = f"{scheme}://{auth}{host}:{proxy['port']}"
+        return ProxyParser._append_fragment(link, proxy.get('name'))
     
     @staticmethod
     def parse_ss(url: str) -> Optional[Dict[str, Any]]:
@@ -529,7 +850,9 @@ class ProxyParser:
             # 解析主体: password@server:port
             password, server_port = main_part.split('@', 1)
             password = urllib.parse.unquote(password)
+            server_port = server_port.rstrip('/')
             server, port = server_port.rsplit(':', 1)
+            port = port.rstrip('/')
             
             node = {
                 'name': name,
@@ -618,6 +941,11 @@ class ProxyParser:
             udp_enabled = ProxyParser._parse_bool(udp)
             if udp_enabled is not None:
                 node['udp'] = udp_enabled
+
+            tfo = ProxyParser._get_first_param(params, 'tfo')
+            tfo_enabled = ProxyParser._parse_bool(tfo)
+            if tfo_enabled is not None:
+                node['tfo'] = tfo_enabled
 
             client_fingerprint = ProxyParser._get_first_param(
                 params,
