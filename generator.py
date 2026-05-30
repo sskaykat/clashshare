@@ -368,7 +368,7 @@ class ClashConfigGenerator:
                      default_flow_style=False,
                      allow_unicode=True,
                      sort_keys=False,
-                     width=float("inf"))
+                     width=10**9)
         
         print(f"✅ 配置文件已保存到: {output_path}")
         print(f"📊 共生成 {len(config['proxies'])} 个代理节点")

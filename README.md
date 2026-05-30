@@ -289,6 +289,7 @@ python app.py
 - VMess
 - VLESS (包括 Reality)
 - Hysteria2
+- AnyTLS
 - Trojan
 - HTTP/HTTPS
 - SOCKS4/SOCKS5

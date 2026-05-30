@@ -254,6 +254,7 @@ async function loadNodes() {
                 <td class="action-buttons">
                     <button class="btn btn-info btn-small" onclick="showEditNodeModal(${node.id})">✏️ 编辑</button>
                     <button class="btn btn-primary btn-small" onclick="renameNode(${node.id}, '${node.name.replace(/'/g, "\\'")}')">📝 重命名</button>
+                    <button class="btn btn-success btn-small" onclick="exportNode(${node.id})">📤 导出</button>
                     <button class="btn btn-danger btn-small" onclick="deleteNode(${node.id})">删除</button>
                 </td>
             `;
@@ -364,6 +365,40 @@ async function batchImportNodes() {
         }
     } catch (error) {
         alert('导入失败: ' + error.message);
+    }
+}
+
+async function exportNode(id) {
+    try {
+        const response = await fetch(`/api/nodes/${id}/export`);
+        if (!response.ok) {
+            let message = '导出失败';
+            try {
+                const data = await response.json();
+                message = data.message || message;
+            } catch (_) {}
+            alert(message);
+            return;
+        }
+
+        const blob = await response.blob();
+        const disposition = response.headers.get('Content-Disposition') || '';
+        const encodedFilename = disposition.match(/filename\*=UTF-8''([^;]+)/i);
+        const plainFilename = disposition.match(/filename="?([^";]+)"?/i);
+        const filename = encodedFilename
+            ? decodeURIComponent(encodedFilename[1])
+            : (plainFilename ? plainFilename[1] : `node-${id}.yaml`);
+
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+    } catch (error) {
+        alert('导出失败: ' + error.message);
     }
 }
 
@@ -1679,6 +1714,28 @@ function getProtocolFields(protocol) {
             { key: 'obfs-password', label: '混淆密码', type: 'text', description: '使用混淆时必填' },
             { key: 'up', label: '上传速度', type: 'text', placeholder: '例如: 50', description: 'Mbps, 可选' },
             { key: 'down', label: '下载速度', type: 'text', placeholder: '例如: 100', description: 'Mbps, 可选' }
+        ],
+        'anytls': [
+            ...commonFields,
+            { key: 'password', label: '密码/认证', type: 'text', required: true },
+            { key: 'sni', label: 'SNI', type: 'text', placeholder: '例如: example.com' },
+            { key: 'skip-cert-verify', label: '跳过证书验证', type: 'checkbox', default: false },
+            { key: 'udp', label: 'UDP支持', type: 'checkbox', default: true },
+            { key: 'client-fingerprint', label: '客户端指纹', type: 'select', options: [
+                { value: '', label: '默认' },
+                { value: 'chrome', label: 'Chrome' },
+                { value: 'firefox', label: 'Firefox' },
+                { value: 'safari', label: 'Safari' },
+                { value: 'ios', label: 'iOS' },
+                { value: 'android', label: 'Android' },
+                { value: 'edge', label: 'Edge' },
+                { value: '360', label: '360浏览器' },
+                { value: 'qq', label: 'QQ浏览器' }
+            ]},
+            { key: 'alpn', label: 'ALPN', type: 'text', placeholder: '例如: h2,http/1.1', description: '用逗号分隔多个值' },
+            { key: 'idle-session-check-interval', label: '空闲会话检查间隔', type: 'number', default: 30, min: 1, description: '单位：秒，默认 30' },
+            { key: 'idle-session-timeout', label: '空闲会话超时', type: 'number', default: 30, min: 1, description: '单位：秒，默认 30' },
+            { key: 'min-idle-session', label: '最小空闲会话数', type: 'number', default: 0, min: 0 }
         ],
         'socks5': [
             ...commonFields,

@@ -48,6 +48,16 @@ def _dump_yaml_bytes(config):
     return yaml_content.encode('utf-8')
 
 
+def _safe_download_filename(name, suffix):
+    """生成可用于下载的文件名。"""
+    invalid_chars = '<>:"/\\|?*'
+    safe_name = ''.join('_' if char in invalid_chars else char for char in str(name or '').strip())
+    safe_name = safe_name.rstrip('. ')
+    if not safe_name:
+        safe_name = 'node'
+    return f'{safe_name[:80]}{suffix}'
+
+
 def _invalidate_subscription_cache(reason='api-write'):
     """清空订阅缓存。"""
     global _subscription_cache_version
@@ -772,6 +782,25 @@ def get_node_detail(node_id):
     })
 
 
+@app.route('/api/nodes/<int:node_id>/export', methods=['GET'])
+@login_required
+def export_node(node_id):
+    """导出单个节点为可重新导入的 YAML 片段。"""
+    node = Node.query.get_or_404(node_id)
+    config = node.get_config()
+    config['name'] = node.name
+
+    yaml_body = _dump_yaml_bytes([config])
+    filename = _safe_download_filename(node.name, '.yaml')
+
+    return send_file(
+        io.BytesIO(yaml_body),
+        mimetype='text/yaml',
+        as_attachment=True,
+        download_name=filename
+    )
+
+
 @app.route('/api/nodes/<int:node_id>/config', methods=['PUT'])
 @login_required
 def update_node_config(node_id):
@@ -824,6 +853,7 @@ def manual_create_node():
         'vless': ['uuid'],
         'trojan': ['password'],
         'hysteria2': ['password'],
+        'anytls': ['password'],
         'socks5': [],  # 用户名密码可选
         'http': []  # 用户名密码可选
     }

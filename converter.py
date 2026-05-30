@@ -12,6 +12,11 @@ from parsers import ProxyParser
 from generator import ClashConfigGenerator
 
 
+for stream in (sys.stdout, sys.stderr):
+    if hasattr(stream, 'reconfigure'):
+        stream.reconfigure(errors='replace')
+
+
 def fetch_subscription(url: str) -> str:
     """
     从 URL 获取订阅内容

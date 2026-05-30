@@ -1,9 +1,10 @@
 """
 协议解析器模块
-支持 SS, SSR, VMess, VLESS, Hysteria2 等协议的解析
+支持 SS, SSR, VMess, VLESS, Hysteria2, AnyTLS 等协议的解析
 """
 
 import base64
+import ipaddress
 import json
 import re
 import urllib.parse
@@ -12,6 +13,60 @@ from typing import Dict, List, Optional, Any
 
 class ProxyParser:
     """代理协议解析器基类"""
+
+    @staticmethod
+    def _get_first_param(params: Dict[str, List[str]], *names: str, default: Any = None) -> Any:
+        for name in names:
+            values = params.get(name)
+            if values:
+                return values[0]
+        return default
+
+    @staticmethod
+    def _parse_bool(value: Any) -> Optional[bool]:
+        if value is None:
+            return None
+
+        normalized = str(value).strip().lower()
+        if normalized in {'1', 'true', 'yes', 'y', 'on'}:
+            return True
+        if normalized in {'0', 'false', 'no', 'n', 'off'}:
+            return False
+        return None
+
+    @staticmethod
+    def _parse_duration_seconds(value: Any) -> Optional[int]:
+        if value is None:
+            return None
+
+        text = str(value).strip().lower()
+        if not text:
+            return None
+
+        match = re.fullmatch(r'(\d+)(ms|s|m|h)?', text)
+        if not match:
+            return None
+
+        amount = int(match.group(1))
+        unit = match.group(2) or 's'
+
+        if unit == 'ms':
+            return max(1, amount // 1000)
+        if unit == 's':
+            return amount
+        if unit == 'm':
+            return amount * 60
+        if unit == 'h':
+            return amount * 3600
+        return None
+
+    @staticmethod
+    def _is_ip_literal(value: str) -> bool:
+        try:
+            ipaddress.ip_address(value.strip('[]'))
+            return True
+        except ValueError:
+            return False
     
     @staticmethod
     def parse_ss(url: str) -> Optional[Dict[str, Any]]:
@@ -506,6 +561,116 @@ class ProxyParser:
         except Exception as e:
             print(f"解析 Hysteria2 链接失败: {e}")
             return None
+
+    @staticmethod
+    def parse_anytls(url: str) -> Optional[Dict[str, Any]]:
+        """
+        解析 AnyTLS 链接
+        最新官方 URI 格式: anytls://[auth@]hostname[:port]/?[key=value]&[key=value]...
+        """
+        try:
+            if not url.startswith('anytls://'):
+                return None
+
+            parsed = urllib.parse.urlsplit(url)
+            server = parsed.hostname
+            if not server:
+                return None
+
+            try:
+                port = parsed.port or 443
+            except ValueError:
+                return None
+
+            params = urllib.parse.parse_qs(parsed.query, keep_blank_values=True)
+            userinfo = parsed.netloc.rsplit('@', 1)[0] if '@' in parsed.netloc else None
+            password = userinfo or ProxyParser._get_first_param(params, 'password', 'auth')
+            if not password:
+                return None
+
+            password = urllib.parse.unquote(password)
+            name = urllib.parse.unquote(parsed.fragment) if parsed.fragment else 'AnyTLS节点'
+
+            node = {
+                'name': name,
+                'type': 'anytls',
+                'server': server,
+                'port': int(port),
+                'password': password,
+            }
+
+            sni = ProxyParser._get_first_param(params, 'sni', 'peer')
+            if sni and not ProxyParser._is_ip_literal(sni):
+                node['sni'] = sni
+
+            insecure = ProxyParser._get_first_param(
+                params,
+                'insecure',
+                'allowInsecure',
+                'skipCertVerify',
+                'skip-cert-verify'
+            )
+            skip_cert_verify = ProxyParser._parse_bool(insecure)
+            if skip_cert_verify is not None:
+                node['skip-cert-verify'] = skip_cert_verify
+
+            udp = ProxyParser._get_first_param(params, 'udp')
+            udp_enabled = ProxyParser._parse_bool(udp)
+            if udp_enabled is not None:
+                node['udp'] = udp_enabled
+
+            client_fingerprint = ProxyParser._get_first_param(
+                params,
+                'fp',
+                'client-fingerprint',
+                'clientFingerprint'
+            )
+            if client_fingerprint:
+                node['client-fingerprint'] = client_fingerprint
+
+            fingerprint = ProxyParser._get_first_param(params, 'fingerprint')
+            if fingerprint:
+                node['fingerprint'] = fingerprint
+
+            alpn_values = []
+            for value in params.get('alpn', []):
+                alpn_values.extend([item.strip() for item in value.split(',') if item.strip()])
+            if alpn_values:
+                node['alpn'] = alpn_values
+
+            idle_check = ProxyParser._get_first_param(
+                params,
+                'idle-session-check-interval',
+                'idle_session_check_interval',
+                'idleSessionCheckInterval'
+            )
+            idle_check_seconds = ProxyParser._parse_duration_seconds(idle_check)
+            if idle_check_seconds is not None:
+                node['idle-session-check-interval'] = idle_check_seconds
+
+            idle_timeout = ProxyParser._get_first_param(
+                params,
+                'idle-session-timeout',
+                'idle_session_timeout',
+                'idleSessionTimeout'
+            )
+            idle_timeout_seconds = ProxyParser._parse_duration_seconds(idle_timeout)
+            if idle_timeout_seconds is not None:
+                node['idle-session-timeout'] = idle_timeout_seconds
+
+            min_idle_session = ProxyParser._get_first_param(
+                params,
+                'min-idle-session',
+                'min_idle_session',
+                'minIdleSession'
+            )
+            if min_idle_session is not None and str(min_idle_session).isdigit():
+                node['min-idle-session'] = int(min_idle_session)
+
+            return node
+        except Exception as e:
+            print(f"解析 AnyTLS 链接失败: {e}")
+            return None
     
     @staticmethod
     def parse_trojan(url: str) -> Optional[Dict[str, Any]]:
@@ -760,6 +925,8 @@ class ProxyParser:
             return ProxyParser.parse_vless(url)
         elif url.startswith('hysteria2://') or url.startswith('hy2://'):
             return ProxyParser.parse_hysteria2(url)
+        elif url.startswith('anytls://'):
+            return ProxyParser.parse_anytls(url)
         elif url.startswith('trojan://'):
             return ProxyParser.parse_trojan(url)
         elif url.startswith('http://') or url.startswith('https://'):
@@ -815,10 +982,10 @@ class ProxyParser:
                     continue
                 
                 # 原样保存，完全不做修改
-                print(f"✅ 节点 {idx+1}: {proxy.get('name')} [{proxy.get('type')}]")
+                print(f"节点 {idx+1}: {proxy.get('name')} [{proxy.get('type')}]")
                 validated_proxies.append(proxy)
             
-            print(f"✅ 成功导入 {len(validated_proxies)}/{len(proxies)} 个节点")
+            print(f"成功导入 {len(validated_proxies)}/{len(proxies)} 个节点")
             return validated_proxies
         
         except ImportError:
@@ -845,6 +1012,7 @@ class ProxyParser:
             'type: trojan' in content_stripped or
             'type: vmess' in content_stripped or
             'type: vless' in content_stripped or
+            'type: anytls' in content_stripped or
             'type: ss' in content_stripped):
             is_yaml = True
         
