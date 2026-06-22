@@ -281,12 +281,9 @@ def _build_proxy_configs_with_chain_dependencies(nodes):
         visible_entries.append((config_name, config))
         pending_dependency_names.extend(_get_chain_dependency_names(config))
 
-    dependency_name_set = set(_dedupe_preserve_order(pending_dependency_names))
-
     for config_name, config in visible_entries:
-        if config_name in dependency_name_set:
-            config['__hidden'] = True
-
+        # Nodes passed in here are explicitly assigned to this output and must
+        # remain selectable, even when another chain node depends on them.
         proxy_configs.append(config)
 
         if config_name:
