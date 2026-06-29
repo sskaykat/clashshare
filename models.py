@@ -101,6 +101,61 @@ class Node(db.Model):
         self.config = json.dumps(config_dict, ensure_ascii=False)
 
 
+class UserNode(db.Model):
+    """用户直接分配节点及其限制配置"""
+    __tablename__ = 'user_nodes'
+
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), primary_key=True)
+    node_id = db.Column(db.Integer, db.ForeignKey('nodes.id'), primary_key=True)
+    traffic_limit = db.Column(db.BigInteger, default=0)  # 单节点总流量限制，0 表示不限
+    traffic_used = db.Column(db.BigInteger, default=0)  # 预留给后续流量统计
+    expiry_time = db.Column(db.BigInteger, default=0)  # 毫秒时间戳，0 表示不过期
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', back_populates='node_assignments')
+    node = db.relationship('Node', backref=db.backref('user_assignments', cascade='all, delete-orphan'))
+
+
+class UserXuiClient(db.Model):
+    """User-owned 3x-ui client mapping and cached traffic state."""
+    __tablename__ = 'user_xui_clients'
+    __table_args__ = (
+        db.UniqueConstraint('backend_id', 'client_email', name='uq_user_xui_client_backend_email'),
+    )
+
+    id = db.Column(db.Integer, primary_key=True)
+    user_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=False, index=True)
+    backend_id = db.Column(db.Integer, db.ForeignKey('xui_configs.id'), nullable=False, index=True)
+    inbound_id = db.Column(db.Integer, nullable=False)
+    inbound_name = db.Column(db.String(255))
+    inbound_protocol = db.Column(db.String(40))
+    client_email = db.Column(db.String(255), nullable=False)
+    sub_id = db.Column(db.String(255))
+    display_name = db.Column(db.String(255))
+    comment = db.Column(db.Text)
+    flow = db.Column(db.String(80))
+    limit_ip = db.Column(db.Integer, default=0)
+    enabled = db.Column(db.Boolean, default=True)
+    online = db.Column(db.Boolean, default=False)
+    traffic_up = db.Column(db.BigInteger, default=0)
+    traffic_down = db.Column(db.BigInteger, default=0)
+    traffic_used = db.Column(db.BigInteger, default=0)
+    traffic_limit = db.Column(db.BigInteger, default=0)
+    expiry_time = db.Column(db.BigInteger, default=0)
+    subscription_host = db.Column(db.String(255), default='')
+    subscription_port = db.Column(db.Integer, default=0)
+    raw_client = db.Column(db.Text)
+    raw_inbound = db.Column(db.Text)
+    last_sync_at = db.Column(db.DateTime)
+    last_error = db.Column(db.Text)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    user = db.relationship('User', back_populates='xui_clients')
+    backend = db.relationship('XuiConfig', backref=db.backref('user_clients', cascade='all, delete-orphan'))
+
+
 class User(db.Model):
     """用户表（实际上是分组/标签）"""
     __tablename__ = 'users'
@@ -113,7 +168,49 @@ class User(db.Model):
     remark = db.Column(db.String(255))  # 备注说明
     template_id = db.Column(db.Integer, db.ForeignKey('templates.id'), nullable=True)  # 使用的模板
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    traffic_limit = db.Column(db.BigInteger, default=0)  # 用户总流量限制，0 表示不限
+    traffic_used = db.Column(db.BigInteger, default=0)  # 预留给后续流量统计
     
     # 多对多关系：用户可以使用多个订阅，订阅也可以被多个用户使用
     subscriptions = db.relationship('Subscription', secondary=user_subscription, back_populates='users')
+    node_assignments = db.relationship('UserNode', back_populates='user', cascade='all, delete-orphan', lazy=True)
+    xui_clients = db.relationship('UserXuiClient', back_populates='user', cascade='all, delete-orphan', lazy=True)
 
+
+class XuiConfig(db.Model):
+    """3x-ui 后端连接配置"""
+    __tablename__ = 'xui_configs'
+
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(120), nullable=False, default='默认后端')
+    base_url = db.Column(db.String(255), nullable=False, default='')
+    auth_mode = db.Column(db.String(20), nullable=False, default='token')  # token 或 password
+    username = db.Column(db.String(120))
+    password = db.Column(db.String(255))
+    api_token = db.Column(db.Text)
+    public_host = db.Column(db.String(255))
+    verify_ssl = db.Column(db.Boolean, default=True)
+    timeout = db.Column(db.Integer, default=15)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    def to_public_dict(self):
+        """返回给前端的安全配置，不泄露密码和 API Token。"""
+        return {
+            'id': self.id,
+            'name': self.name or f'后端 {self.id}',
+            'base_url': self.base_url,
+            'public_host': self.public_host or '',
+            'auth_mode': self.auth_mode,
+            'username': self.username or '',
+            'has_password': bool(self.password),
+            'has_api_token': bool(self.api_token),
+            'verify_ssl': self.verify_ssl,
+            'timeout': self.timeout,
+            'created_at': self.created_at.strftime('%Y-%m-%d %H:%M:%S') if self.created_at else None,
+            'updated_at': self.updated_at.strftime('%Y-%m-%d %H:%M:%S') if self.updated_at else None,
+            'configured': bool(self.base_url and (
+                (self.auth_mode == 'token' and self.api_token) or
+                (self.auth_mode == 'password' and self.username and self.password)
+            ))
+        }

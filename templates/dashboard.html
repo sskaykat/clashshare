@@ -40,6 +40,10 @@
                     <span class="icon">🔗</span>
                     <span>生成链式</span>
                 </a>
+                <a href="#xui" class="nav-item" data-tab="xui">
+                    <span class="icon">🔌</span>
+                    <span>对接3x-ui后端</span>
+                </a>
                 <a href="#settings" class="nav-item" data-tab="settings">
                     <span class="icon">⚙️</span>
                     <span>系统设置</span>
@@ -176,11 +180,13 @@
                     <table id="users-table">
                         <thead>
                             <tr>
+                                <th style="width: 42px;"></th>
                                 <th>名称</th>
                                 <th>备注</th>
                                 <th>配置模板</th>
                                 <th>订阅数</th>
                                 <th>节点数</th>
+                                <th>流量限制</th>
                                 <th>状态</th>
                                 <th>订阅链接</th>
                                 <th>操作</th>
@@ -255,6 +261,32 @@
                         <tbody></tbody>
                     </table>
                 </div>
+            </div>
+
+            <!-- 对接 3x-ui 后端 -->
+            <div id="xui-tab" class="tab-content">
+                <div class="tab-header">
+                    <h1>🔌 对接3x-ui后端</h1>
+                    <div class="header-actions">
+                        <button class="btn btn-secondary" onclick="loadXuiDashboard()">刷新</button>
+                        <button class="btn btn-success" onclick="showXuiBackendModal()">新增后端</button>
+                        <button class="btn btn-info" onclick="showAddXuiInboundModal()">新建入站节点</button>
+                    </div>
+                </div>
+
+                <div id="xui-backend-cards" class="xui-backend-grid">
+                    <div class="xui-empty-state">暂无后端，点击右上角新增后端。</div>
+                </div>
+
+                <div class="xui-section">
+                    <div class="tab-header compact">
+                        <h2>入站节点与客户端</h2>
+                    </div>
+                    <div id="xui-inbound-groups" class="xui-inbound-groups">
+                        <div class="xui-empty-state">请先新增并测试 3x-ui 后端。</div>
+                    </div>
+                </div>
+
             </div>
             
             <!-- 系统设置 -->
@@ -437,6 +469,11 @@
                     <label>备注（可选）</label>
                     <input type="text" id="userRemark" placeholder="添加备注说明">
                 </div>
+                <div class="form-group">
+                    <label>总流量限制 GB</label>
+                    <input type="number" id="userTrafficLimitGb" min="0" step="0.1" value="0">
+                    <small style="color: #666;">0 表示不限；用于订阅客户端的总流量额度展示。</small>
+                </div>
                 <div class="info-box" style="margin-top: 15px;">
                     <small>💡 创建后会自动生成订阅链接，可为该用户分配专属节点。</small>
                 </div>
@@ -463,6 +500,11 @@
                 <div class="form-group">
                     <label>备注</label>
                     <input type="text" id="editUserRemark" placeholder="备注说明">
+                </div>
+                <div class="form-group">
+                    <label>总流量限制 GB</label>
+                    <input type="number" id="editUserTrafficLimitGb" min="0" step="0.1" value="0">
+                    <small style="color: #666;">0 表示不限；已用流量保留在后台统计字段中。</small>
                 </div>
                 <div class="form-group">
                     <label>自定义链接后缀（可选）</label>
@@ -500,6 +542,173 @@
             <div class="modal-footer">
                 <button class="btn btn-secondary" onclick="closeModal('assignSubscriptionsModal')">取消</button>
                 <button class="btn btn-primary" onclick="saveUserSubscriptions()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 管理用户 3x-ui 节点模态框 -->
+    <div id="assignUserNodesModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>管理节点 - <span id="assignNodeUserName"></span></h2>
+                <span class="close" onclick="closeModal('assignUserNodesModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box" style="margin-bottom: 15px;">
+                    <p><strong>说明：</strong>这里会在 3x-ui 中为该用户创建客户端，并从 3x-ui 同步流量统计。每个入站会创建一个独立客户端，创建后自动进入该用户订阅。</p>
+                </div>
+                <div class="user-node-actions">
+                    <button class="btn btn-info btn-small" type="button" onclick="toggleUserNodeCreateForm(true, 'existing')">选择已有入站</button>
+                    <button class="btn btn-success btn-small" type="button" onclick="toggleUserNodeCreateForm(true, 'quick')">快捷新建入站</button>
+                    <button class="btn btn-secondary btn-small" type="button" onclick="refreshUserXuiClients()">同步流量</button>
+                </div>
+                <div class="user-node-create-form" id="userNodeCreateForm" style="display: none;">
+                    <div class="user-node-create-mode-tabs">
+                        <button class="active" type="button" data-user-node-create-mode="existing" onclick="showUserNodeCreateMode('existing')">选择已有入站</button>
+                        <button type="button" data-user-node-create-mode="quick" onclick="showUserNodeCreateMode('quick')">快捷新建入站</button>
+                    </div>
+
+                    <div id="userNodeExistingCreateSection">
+                        <div class="user-node-create-grid">
+                            <div class="form-group">
+                                <label>3x-ui 后端</label>
+                                <select id="userXuiBackendSelect" onchange="loadUserXuiBackendInbounds()"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>入站总流量 GB</label>
+                                <input type="number" id="userNodeCreateLimitGb" min="0" step="0.1" placeholder="留空不修改">
+                            </div>
+                            <div class="form-group">
+                                <label>入站到期</label>
+                                <input type="datetime-local" id="userNodeCreateExpiry">
+                            </div>
+                            <div class="form-group">
+                                <label>流量重置</label>
+                                <select id="userNodeCreateReset">
+                                    <option value="">不修改</option>
+                                    <option value="0">从不</option>
+                                    <option value="1">每日</option>
+                                    <option value="2">每周</option>
+                                    <option value="3">每月</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>IP 限制</label>
+                                <input type="number" id="userXuiLimitIp" min="0" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>备注</label>
+                                <input type="text" id="userXuiComment" placeholder="可选">
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="userXuiEnable" checked>
+                                    启用客户端
+                                </label>
+                            </div>
+                        </div>
+                        <div class="form-group">
+                            <label>选择入站</label>
+                            <div id="userXuiInboundSelection" class="user-node-selection user-xui-inbounds"></div>
+                        </div>
+                        <div class="user-node-create-footer">
+                            <button class="btn btn-secondary btn-small" type="button" onclick="toggleUserNodeCreateForm(false)">收起</button>
+                            <button class="btn btn-primary btn-small" type="button" onclick="createNodeForCurrentUser()">创建并挂到用户</button>
+                        </div>
+                    </div>
+
+                    <div id="userNodeQuickCreateSection" style="display: none;">
+                        <div class="user-node-create-grid user-quick-create-grid">
+                            <div class="form-group">
+                                <label>3x-ui 后端</label>
+                                <select id="userQuickXuiBackendSelect" onchange="handleUserQuickBackendChange()"></select>
+                            </div>
+                            <div class="form-group">
+                                <label>节点名称</label>
+                                <input type="text" id="userQuickInboundName" placeholder="自动生成" oninput="syncUserQuickFieldsToEditor()">
+                            </div>
+                            <div class="form-group">
+                                <label>端口</label>
+                                <div class="xui-port-row">
+                                    <input type="number" id="userQuickInboundPort" min="1" max="65535" oninput="syncUserQuickFieldsToEditor()">
+                                    <button type="button" class="btn btn-secondary btn-small" onclick="randomizeUserQuickInboundPort()">随机</button>
+                                </div>
+                            </div>
+                            <div class="form-group">
+                                <label>协议</label>
+                                <select id="userQuickInboundProtocol" onchange="syncUserQuickFieldsToEditor()">
+                                    <option value="vless">VLESS</option>
+                                    <option value="vmess">VMess</option>
+                                    <option value="trojan">Trojan</option>
+                                    <option value="shadowsocks">Shadowsocks</option>
+                                    <option value="hysteria2">Hysteria2</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>传输</label>
+                                <select id="userQuickInboundNetwork" onchange="syncUserQuickFieldsToEditor()">
+                                    <option value="tcp">RAW</option>
+                                    <option value="ws">WebSocket</option>
+                                    <option value="grpc">gRPC</option>
+                                    <option value="httpupgrade">HTTPUpgrade</option>
+                                    <option value="xhttp">XHTTP</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>安全</label>
+                                <select id="userQuickInboundSecurity" onchange="syncUserQuickFieldsToEditor()">
+                                    <option value="none">无</option>
+                                    <option value="tls">TLS</option>
+                                    <option value="xtls">XTLS</option>
+                                    <option value="reality">Reality</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>入站总流量 GB</label>
+                                <input type="number" id="userQuickInboundTotalGb" min="0" step="0.1" value="0" oninput="syncUserQuickFieldsToEditor()">
+                            </div>
+                            <div class="form-group">
+                                <label>入站到期</label>
+                                <input type="datetime-local" id="userQuickInboundExpiry" oninput="syncUserQuickFieldsToEditor()">
+                            </div>
+                            <div class="form-group">
+                                <label>流量重置</label>
+                                <select id="userQuickInboundReset" onchange="syncUserQuickFieldsToEditor()">
+                                    <option value="0">从不</option>
+                                    <option value="1">每日</option>
+                                    <option value="2">每周</option>
+                                    <option value="3">每月</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <label>IP 限制</label>
+                                <input type="number" id="userQuickClientLimitIp" min="0" value="0">
+                            </div>
+                            <div class="form-group">
+                                <label>备注</label>
+                                <input type="text" id="userQuickClientComment" placeholder="可选">
+                            </div>
+                            <div class="form-group checkbox-group">
+                                <label>
+                                    <input type="checkbox" id="userQuickClientEnable" checked>
+                                    启用客户端
+                                </label>
+                            </div>
+                        </div>
+                        <div class="user-node-create-footer">
+                            <button class="btn btn-secondary btn-small" type="button" id="userQuickAdvancedToggle" onclick="toggleUserQuickFullConfig()">展开完整配置</button>
+                            <button class="btn btn-secondary btn-small" type="button" onclick="toggleUserNodeCreateForm(false)">收起</button>
+                            <button class="btn btn-primary btn-small" type="button" id="userQuickCreateBtn" onclick="createInboundForCurrentUser()">创建入站并挂到用户</button>
+                        </div>
+                        <div id="userQuickAdvancedConfig" class="user-quick-advanced-config" style="display: none;">
+                            <div id="userQuickXuiInboundEditorMount"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="user-node-selection" id="userNodeSelection"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('assignUserNodesModal')">关闭</button>
             </div>
         </div>
     </div>
@@ -770,8 +979,215 @@
             </div>
         </div>
     </div>
+
+    <!-- 3x-ui 后端配置模态框 -->
+    <div id="xuiBackendModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2 id="xuiBackendModalTitle">新增 3x-ui 后端</h2>
+                <span class="close" onclick="closeModal('xuiBackendModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="xui-two-columns">
+                    <div class="form-group">
+                        <label>后端名称</label>
+                        <input type="text" id="xuiBackendName" placeholder="例如: 阿里云香港、rfc香港">
+                    </div>
+                    <div class="form-group">
+                        <label>超时秒数</label>
+                        <input type="number" id="xuiTimeout" min="3" max="60" value="15">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>3x-ui 面板地址</label>
+                    <input type="url" id="xuiBaseUrl" placeholder="例如: https://example.com:2053">
+                    <small style="color: #666;">如使用自定义访问路径，请把路径一并填入。</small>
+                </div>
+                <div class="form-group">
+                    <label>订阅连接地址</label>
+                    <input type="text" id="xuiPublicHost" placeholder="例如: node.example.com">
+                    <small style="color: #666;">客户端订阅里使用的节点域名或 IP；留空时从面板地址自动提取。</small>
+                </div>
+                <div class="form-group">
+                    <label>认证方式</label>
+                    <select id="xuiAuthMode" onchange="toggleXuiAuthFields()">
+                        <option value="token">API Token</option>
+                        <option value="password">用户名密码</option>
+                    </select>
+                </div>
+                <div id="xuiTokenFields">
+                    <div class="form-group">
+                        <label>API Token</label>
+                        <input type="password" id="xuiApiToken" placeholder="编辑时留空则保留已保存 Token">
+                    </div>
+                </div>
+                <div id="xuiPasswordFields" style="display: none;">
+                    <div class="xui-two-columns">
+                        <div class="form-group">
+                            <label>用户名</label>
+                            <input type="text" id="xuiUsername" placeholder="3x-ui 管理员用户名">
+                        </div>
+                        <div class="form-group">
+                            <label>密码</label>
+                            <input type="password" id="xuiPassword" placeholder="编辑时留空则保留已保存密码">
+                        </div>
+                    </div>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="xuiVerifySsl" checked>
+                        验证 HTTPS 证书（自签证书请关闭）
+                    </label>
+                    <small style="color: #666;">关闭后会跳过 TLS 证书校验，适用于自签证书或内网面板。</small>
+                </div>
+                <div id="xuiBackendTestHint" class="xui-test-hint">请先填写信息并测试连接。</div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('xuiBackendModal')">取消</button>
+                <button class="btn btn-info" onclick="testXuiBackendDraft()">测试连接</button>
+                <button class="btn btn-primary" id="xuiBackendConfirmBtn" onclick="confirmXuiBackend()" disabled>确认保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3x-ui 新建入站节点模态框 -->
+    <div id="addXuiInboundModal" class="modal">
+        <div class="modal-content modal-large modal-xui-inbound">
+            <div class="modal-header">
+                <h2>新建 3x-ui 入站节点</h2>
+                <span class="close" onclick="closeModal('addXuiInboundModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="xuiInboundEditorMount"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addXuiInboundModal')">取消</button>
+                <button class="btn btn-primary" onclick="createXuiInbound()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3x-ui 编辑入站节点模态框 -->
+    <div id="editXuiInboundModal" class="modal">
+        <div class="modal-content modal-large modal-xui-inbound">
+            <div class="modal-header">
+                <h2>编辑 3x-ui 入站节点</h2>
+                <span class="close" onclick="closeModal('editXuiInboundModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="editXuiInboundEditorMount"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('editXuiInboundModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveXuiInboundEdit()">保存</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3x-ui 新建客户端模态框 -->
+    <div id="addXuiClientModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>新建 3x-ui 客户端</h2>
+                <span class="close" onclick="closeModal('addXuiClientModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div id="xuiClientNodeHint" class="xui-client-node-hint">请先从某个入站节点新增客户端。</div>
+                <div class="xui-two-columns">
+                    <div class="form-group">
+                        <label>Email / 唯一标识</label>
+                        <input type="text" id="xuiClientEmail" placeholder="例如: alice@example.com">
+                    </div>
+                    <div class="form-group">
+                        <label>订阅 ID（可选）</label>
+                        <input type="text" id="xuiClientSubId" placeholder="留空由 3x-ui 生成">
+                    </div>
+                    <div class="form-group">
+                        <label>流量上限 GB</label>
+                        <input type="number" id="xuiClientTotalGb" min="0" step="0.1" value="0">
+                        <small style="color: #666;">0 表示不限流量。</small>
+                    </div>
+                    <div class="form-group">
+                        <label>有效天数</label>
+                        <input type="number" id="xuiClientExpiryDays" min="0" value="0">
+                        <small style="color: #666;">0 表示永不过期。</small>
+                    </div>
+                    <div class="form-group">
+                        <label>IP 限制</label>
+                        <input type="number" id="xuiClientLimitIp" min="0" value="0">
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <input type="text" id="xuiClientComment" placeholder="可选">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>挂载到入站节点</label>
+                    <select id="xuiClientInboundIds" multiple size="6"></select>
+                    <small style="color: #666;">按住 Ctrl / Cmd 可多选。</small>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="xuiClientEnable" checked>
+                        启用此客户端
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('addXuiClientModal')">取消</button>
+                <button class="btn btn-primary" onclick="createXuiClient()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- 3x-ui 编辑客户端模态框 -->
+    <div id="editXuiClientModal" class="modal">
+        <div class="modal-content modal-large">
+            <div class="modal-header">
+                <h2>编辑 3x-ui 客户端</h2>
+                <span class="close" onclick="closeModal('editXuiClientModal')">&times;</span>
+            </div>
+            <div class="modal-body">
+                <div class="info-box xui-client-title">
+                    <strong id="editXuiClientEmailLabel">-</strong>
+                    <span id="editXuiClientUsageLabel"></span>
+                </div>
+                <div class="xui-two-columns">
+                    <div class="form-group">
+                        <label>流量上限 GB</label>
+                        <input type="number" id="editXuiClientTotalGb" min="0" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>从现在起有效天数</label>
+                        <input type="number" id="editXuiClientExpiryDays" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>IP 限制</label>
+                        <input type="number" id="editXuiClientLimitIp" min="0">
+                    </div>
+                    <div class="form-group">
+                        <label>备注</label>
+                        <input type="text" id="editXuiClientComment">
+                    </div>
+                </div>
+                <div class="form-group">
+                    <label>挂载到入站节点</label>
+                    <select id="editXuiClientInboundIds" multiple size="6"></select>
+                </div>
+                <div class="form-group checkbox-group">
+                    <label>
+                        <input type="checkbox" id="editXuiClientEnable">
+                        启用此客户端
+                    </label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="btn btn-secondary" onclick="closeModal('editXuiClientModal')">取消</button>
+                <button class="btn btn-primary" onclick="saveXuiClientEdit()">保存</button>
+            </div>
+        </div>
+    </div>
     
-    <script src="{{ url_for('static', filename='js/dashboard.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/dashboard.js') }}?v=user-node-endpoint-override-20260629-1"></script>
 </body>
 </html>
-
